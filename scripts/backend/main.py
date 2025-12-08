@@ -9,6 +9,7 @@ Requirements:
 import asyncio
 import json
 import logging
+import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
@@ -16,6 +17,20 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+from database import (
+    init_database,
+    AIModelRepository,
+    ExchangeRepository,
+    AgentRepository,
+    OrderRepository,
+    PositionRepository,
+    ConversationRepository,
+    ToolCallRepository,
+    SignalRepository,
+    BalanceHistoryRepository,
+    ActivityLogRepository
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,18 +40,18 @@ logger = logging.getLogger(__name__)
 # ============== Pydantic Models ==============
 
 class AIModelConfig(BaseModel):
-    id: str
+    id: Optional[str] = None
     name: str
-    provider: str  # openai, anthropic, deepseek, custom
+    provider: str
     api_key: str
     base_url: Optional[str] = None
     model: str
 
 
 class ExchangeConfig(BaseModel):
-    id: str
+    id: Optional[str] = None
     name: str
-    exchange: str  # binance, okx, bybit, bitget, gate
+    exchange: str
     api_key: str
     secret_key: str
     passphrase: Optional[str] = None
@@ -44,7 +59,7 @@ class ExchangeConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    id: str
+    id: Optional[str] = None
     name: str
     model_id: str
     exchange_id: str
@@ -52,23 +67,16 @@ class AgentConfig(BaseModel):
     timeframe: str
     indicators: List[str]
     prompt: str
-    max_position_size: float = 1000.0  # USD
-    risk_per_trade: float = 0.02  # 2%
+    max_position_size: float = 1000.0
+    risk_per_trade: float = 0.02
     default_leverage: int = 1
-
-
-class TradingSignal(BaseModel):
-    action: str  # buy, sell, hold
-    reason: str
-    take_profit: Optional[float] = None
-    stop_loss: Optional[float] = None
 
 
 class OrderRequest(BaseModel):
     agent_id: str
     symbol: str
-    side: str  # buy, sell
-    order_type: str  # market, limit
+    side: str
+    order_type: str
     amount: float
     price: Optional[float] = None
 
@@ -114,177 +122,135 @@ class ExchangeManager:
         self.exchanges: Dict[str, Any] = {}
         self.kline_tasks: Dict[str, asyncio.Task] = {}
     
-    async def connect_exchange(self, config: ExchangeConfig) -> bool:
+    async def connect_exchange(self, config: dict) -> bool:
         """Connect to an exchange"""
         try:
             import ccxt.pro as ccxtpro
             
-            exchange_class = getattr(ccxtpro, config.exchange, None)
+            exchange_name = config['exchange']
+            exchange_class = getattr(ccxtpro, exchange_name, None)
             if not exchange_class:
-                logger.error(f"Exchange {config.exchange} not supported")
+                logger.error(f"Exchange {exchange_name} not supported")
                 return False
             
             exchange_config = {
-                'apiKey': config.api_key,
-                'secret': config.secret_key,
+                'apiKey': config['api_key'],
+                'secret': config['secret_key'],
                 'enableRateLimit': True,
             }
             
-            if config.passphrase:
-                exchange_config['password'] = config.passphrase
+            if config.get('passphrase'):
+                exchange_config['password'] = config['passphrase']
             
-            if config.testnet:
+            if config.get('testnet'):
                 exchange_config['sandbox'] = True
             
             exchange = exchange_class(exchange_config)
-            self.exchanges[config.id] = exchange
+            self.exchanges[config['id']] = exchange
             
             await exchange.load_markets()
-            logger.info(f"Connected to {config.exchange}")
+            
+            # Update exchange status in database
+            ExchangeRepository.update(config['id'], {'status': 'connected'})
+            ActivityLogRepository.log('info', f"Connected to {exchange_name}", details={'exchange_id': config['id']})
+            
+            logger.info(f"Connected to {exchange_name}")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to connect to {config.exchange}: {e}")
+            logger.error(f"Failed to connect to exchange: {e}")
+            ExchangeRepository.update(config['id'], {'status': 'error'})
+            ActivityLogRepository.log('error', f"Failed to connect to exchange: {e}", details={'exchange_id': config['id']})
             return False
     
     async def disconnect_exchange(self, exchange_id: str):
         """Disconnect from an exchange"""
         if exchange_id in self.exchanges:
-            await self.exchanges[exchange_id].close()
+            try:
+                await self.exchanges[exchange_id].close()
+            except:
+                pass
             del self.exchanges[exchange_id]
+            ExchangeRepository.update(exchange_id, {'status': 'disconnected'})
+            logger.info(f"Disconnected from exchange {exchange_id}")
     
-    async def get_ticker(self, exchange_id: str, symbol: str) -> dict:
-        """Get current ticker/price info"""
+    async def get_ticker(self, exchange_id: str, symbol: str) -> Optional[dict]:
+        """Get current ticker data"""
         if exchange_id not in self.exchanges:
-            return {}
+            return None
         try:
             ticker = await self.exchanges[exchange_id].fetch_ticker(symbol)
-            return {
-                'last': ticker.get('last', 0),
-                'bid': ticker.get('bid', 0),
-                'ask': ticker.get('ask', 0),
-                'volume': ticker.get('baseVolume', 0),
-                'change': ticker.get('percentage', 0)
-            }
+            return ticker
         except Exception as e:
-            logger.error(f"Failed to get ticker: {e}")
-            return {}
+            logger.error(f"Error fetching ticker: {e}")
+            return None
     
-    async def get_balance(self, exchange_id: str) -> dict:
+    async def get_balance(self, exchange_id: str) -> Optional[dict]:
         """Get account balance"""
         if exchange_id not in self.exchanges:
-            return {}
+            return None
         try:
             balance = await self.exchanges[exchange_id].fetch_balance()
-            usdt = balance.get('USDT', {})
-            return {
-                'total': usdt.get('total', 0),
-                'free': usdt.get('free', 0),
-                'used': usdt.get('used', 0)
-            }
+            return balance
         except Exception as e:
-            logger.error(f"Failed to get balance: {e}")
-            return {}
+            logger.error(f"Error fetching balance: {e}")
+            return None
     
-    async def place_stop_order(
-        self,
-        exchange_id: str,
-        symbol: str,
-        side: str,
-        amount: float,
-        stop_price: float
-    ) -> dict:
-        """Place a stop order"""
-        if exchange_id not in self.exchanges:
-            raise HTTPException(status_code=404, detail="Exchange not found")
-        
-        exchange = self.exchanges[exchange_id]
-        try:
-            order = await exchange.create_order(
-                symbol, 'stop', side, amount, stop_price,
-                params={'stopPrice': stop_price}
-            )
-            return order
-        except Exception as e:
-            logger.error(f"Stop order error: {e}")
-            # Fallback: some exchanges use different methods
-            try:
-                order = await exchange.create_order(
-                    symbol, 'stop_market', side, amount, None,
-                    params={'stopPrice': stop_price}
-                )
-                return order
-            except:
-                raise HTTPException(status_code=500, detail=str(e))
-    
-    async def cancel_order(self, exchange_id: str, order_id: str, symbol: str) -> dict:
-        """Cancel an order"""
-        if exchange_id not in self.exchanges:
-            raise HTTPException(status_code=404, detail="Exchange not found")
-        
-        exchange = self.exchanges[exchange_id]
-        try:
-            result = await exchange.cancel_order(order_id, symbol)
-            return result
-        except Exception as e:
-            logger.error(f"Cancel order error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    async def fetch_ohlcv(
-        self,
-        exchange_id: str,
-        symbol: str,
-        timeframe: str,
-        limit: int = 100
-    ) -> List[dict]:
-        """Fetch historical OHLCV data"""
+    async def get_positions(self, exchange_id: str, symbol: Optional[str] = None) -> List[dict]:
+        """Get open positions"""
         if exchange_id not in self.exchanges:
             return []
-        
         try:
             exchange = self.exchanges[exchange_id]
-            ohlcv = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-            return [
-                {
-                    'timestamp': k[0],
-                    'open': k[1],
-                    'high': k[2],
-                    'low': k[3],
-                    'close': k[4],
-                    'volume': k[5]
-                } for k in ohlcv
-            ]
+            if hasattr(exchange, 'fetch_positions'):
+                positions = await exchange.fetch_positions([symbol] if symbol else None)
+                return [p for p in positions if float(p.get('contracts', 0)) != 0]
+            return []
         except Exception as e:
-            logger.error(f"Failed to fetch OHLCV: {e}")
+            logger.error(f"Error fetching positions: {e}")
             return []
     
-    async def place_order(
-        self,
-        exchange_id: str,
-        symbol: str,
-        side: str,
-        order_type: str,
-        amount: float,
-        price: Optional[float] = None
-    ) -> dict:
-        """Place an order on the exchange"""
+    async def get_klines(self, exchange_id: str, symbol: str, timeframe: str, limit: int = 100) -> List:
+        """Get OHLCV data"""
         if exchange_id not in self.exchanges:
-            raise HTTPException(status_code=404, detail="Exchange not found")
-        
-        exchange = self.exchanges[exchange_id]
-        
+            return []
         try:
+            ohlcv = await self.exchanges[exchange_id].fetch_ohlcv(symbol, timeframe, limit=limit)
+            return ohlcv
+        except Exception as e:
+            logger.error(f"Error fetching klines: {e}")
+            return []
+    
+    async def create_order(self, exchange_id: str, symbol: str, order_type: str, 
+                          side: str, amount: float, price: Optional[float] = None) -> Optional[dict]:
+        """Create an order"""
+        if exchange_id not in self.exchanges:
+            return None
+        try:
+            exchange = self.exchanges[exchange_id]
             if order_type == 'market':
                 order = await exchange.create_market_order(symbol, side, amount)
             else:
-                if price is None:
-                    raise HTTPException(status_code=400, detail="Price required for limit orders")
                 order = await exchange.create_limit_order(symbol, side, amount, price)
             
+            ActivityLogRepository.log('info', f"Order created: {side} {amount} {symbol}", 
+                                     details={'order': order})
             return order
         except Exception as e:
-            logger.error(f"Order error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            logger.error(f"Error creating order: {e}")
+            ActivityLogRepository.log('error', f"Order failed: {e}")
+            return None
+    
+    async def cancel_order(self, exchange_id: str, order_id: str, symbol: str) -> bool:
+        """Cancel an order"""
+        if exchange_id not in self.exchanges:
+            return False
+        try:
+            await self.exchanges[exchange_id].cancel_order(order_id, symbol)
+            return True
+        except Exception as e:
+            logger.error(f"Error canceling order: {e}")
+            return False
 
 
 class IndicatorCalculator:
@@ -296,11 +262,11 @@ class IndicatorCalculator:
             return 50.0
         
         deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-        gains = [d if d > 0 else 0 for d in deltas]
-        losses = [-d if d < 0 else 0 for d in deltas]
+        gains = [d if d > 0 else 0 for d in deltas[-period:]]
+        losses = [-d if d < 0 else 0 for d in deltas[-period:]]
         
-        avg_gain = sum(gains[-period:]) / period
-        avg_loss = sum(losses[-period:]) / period
+        avg_gain = sum(gains) / period
+        avg_loss = sum(losses) / period
         
         if avg_loss == 0:
             return 100.0
@@ -309,68 +275,77 @@ class IndicatorCalculator:
         return 100 - (100 / (1 + rs))
     
     @staticmethod
+    def calculate_ema(data: List[float], period: int) -> float:
+        if len(data) < period:
+            return data[-1] if data else 0
+        
+        multiplier = 2 / (period + 1)
+        ema = sum(data[:period]) / period
+        
+        for price in data[period:]:
+            ema = (price - ema) * multiplier + ema
+        
+        return ema
+    
+    @staticmethod
     def calculate_adx(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
-        """Average Directional Index"""
-        if len(closes) < period * 2:
+        if len(closes) < period + 1:
             return 25.0
         
+        # Simplified ADX calculation
         tr_list = []
-        plus_dm_list = []
-        minus_dm_list = []
+        plus_dm = []
+        minus_dm = []
         
         for i in range(1, len(closes)):
             high_diff = highs[i] - highs[i-1]
             low_diff = lows[i-1] - lows[i]
             
-            tr = max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i-1]),
-                abs(lows[i] - closes[i-1])
-            )
+            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
             tr_list.append(tr)
             
-            plus_dm = high_diff if high_diff > low_diff and high_diff > 0 else 0
-            minus_dm = low_diff if low_diff > high_diff and low_diff > 0 else 0
-            plus_dm_list.append(plus_dm)
-            minus_dm_list.append(minus_dm)
+            plus_dm.append(high_diff if high_diff > low_diff and high_diff > 0 else 0)
+            minus_dm.append(low_diff if low_diff > high_diff and low_diff > 0 else 0)
         
+        if len(tr_list) < period:
+            return 25.0
+            
         atr = sum(tr_list[-period:]) / period
-        plus_di = 100 * (sum(plus_dm_list[-period:]) / period) / atr if atr > 0 else 0
-        minus_di = 100 * (sum(minus_dm_list[-period:]) / period) / atr if atr > 0 else 0
+        if atr == 0:
+            return 25.0
+            
+        plus_di = 100 * sum(plus_dm[-period:]) / period / atr
+        minus_di = 100 * sum(minus_dm[-period:]) / period / atr
         
-        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di) if (plus_di + minus_di) > 0 else 0
+        if plus_di + minus_di == 0:
+            return 25.0
+            
+        dx = 100 * abs(plus_di - minus_di) / (plus_di + minus_di)
         return dx
     
     @staticmethod
     def calculate_chop(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
-        """Choppiness Index"""
-        import math
-        
         if len(closes) < period + 1:
             return 50.0
         
-        tr_sum = 0
-        for i in range(1, period + 1):
-            idx = -period - 1 + i
-            tr = max(
-                highs[idx] - lows[idx],
-                abs(highs[idx] - closes[idx-1]),
-                abs(lows[idx] - closes[idx-1])
-            )
-            tr_sum += tr
+        import math
+        
+        atr_sum = 0
+        for i in range(-period, 0):
+            tr = max(highs[i] - lows[i], abs(highs[i] - closes[i-1]), abs(lows[i] - closes[i-1]))
+            atr_sum += tr
         
         highest_high = max(highs[-period:])
         lowest_low = min(lows[-period:])
         
-        if highest_high - lowest_low == 0:
+        if highest_high == lowest_low:
             return 50.0
         
-        chop = 100 * math.log10(tr_sum / (highest_high - lowest_low)) / math.log10(period)
+        chop = 100 * math.log10(atr_sum / (highest_high - lowest_low)) / math.log10(period)
         return max(0, min(100, chop))
     
     @staticmethod
     def calculate_kama(closes: List[float], period: int = 10, fast: int = 2, slow: int = 30) -> float:
-        """Kaufman Adaptive Moving Average"""
         if len(closes) < period + 1:
             return closes[-1] if closes else 0
         
@@ -381,7 +356,6 @@ class IndicatorCalculator:
             return closes[-1]
         
         er = change / volatility
-        
         fast_sc = 2 / (fast + 1)
         slow_sc = 2 / (slow + 1)
         sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
@@ -393,195 +367,53 @@ class IndicatorCalculator:
         return kama
     
     @staticmethod
-    def calculate_ema(closes: List[float], period: int = 20) -> float:
-        """Exponential Moving Average"""
-        if not closes:
-            return 0
-        multiplier = 2 / (period + 1)
-        ema = closes[0]
-        for price in closes[1:]:
-            ema = (price * multiplier) + (ema * (1 - multiplier))
-        return ema
-    
-    @staticmethod
-    def calculate_bollinger(closes: List[float], period: int = 20, std_dev: float = 2) -> dict:
-        """Bollinger Bands"""
-        if len(closes) < period:
-            return {'upper': 0, 'middle': 0, 'lower': 0}
-        
-        sma = sum(closes[-period:]) / period
-        variance = sum((x - sma) ** 2 for x in closes[-period:]) / period
-        std = variance ** 0.5
-        
-        return {
-            'upper': sma + std_dev * std,
-            'middle': sma,
-            'lower': sma - std_dev * std
-        }
-    
-    @staticmethod
-    def calculate_macd(closes: List[float], fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
-        """MACD Indicator"""
-        if len(closes) < slow:
-            return {'macd': 0, 'signal': 0, 'histogram': 0}
-        
-        def ema(data, period):
-            multiplier = 2 / (period + 1)
-            result = data[0]
-            for price in data[1:]:
-                result = (price * multiplier) + (result * (1 - multiplier))
-            return result
-        
-        fast_ema = ema(closes, fast)
-        slow_ema = ema(closes, slow)
-        macd_line = fast_ema - slow_ema
-        signal_line = macd_line * 0.9
-        
-        return {
-            'macd': round(macd_line, 2),
-            'signal': round(signal_line, 2),
-            'histogram': round(macd_line - signal_line, 2)
-        }
-    
-    @staticmethod
-    def calculate_atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
-        """Average True Range"""
-        if len(closes) < period + 1:
-            return 0
-        
-        tr_list = []
-        for i in range(1, len(closes)):
-            tr = max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i-1]),
-                abs(lows[i] - closes[i-1])
-            )
-            tr_list.append(tr)
-        
-        return sum(tr_list[-period:]) / period
-    
-    @staticmethod
-    def calculate_stoch_rsi(closes: List[float], period: int = 14) -> dict:
-        """Stochastic RSI"""
-        if len(closes) < period * 2:
-            return {'k': 50, 'd': 50}
-        
-        # Calculate RSI values
-        rsi_values = []
-        for i in range(period, len(closes)):
-            subset = closes[i-period:i+1]
-            rsi = IndicatorCalculator.calculate_rsi(subset, period)
-            rsi_values.append(rsi)
-        
-        if len(rsi_values) < period:
-            return {'k': 50, 'd': 50}
-        
-        recent_rsi = rsi_values[-period:]
-        lowest_rsi = min(recent_rsi)
-        highest_rsi = max(recent_rsi)
-        
-        if highest_rsi - lowest_rsi == 0:
-            stoch_k = 50
-        else:
-            stoch_k = ((rsi_values[-1] - lowest_rsi) / (highest_rsi - lowest_rsi)) * 100
-        
-        stoch_d = sum(rsi_values[-3:]) / 3 if len(rsi_values) >= 3 else stoch_k
-        
-        return {'k': round(stoch_k, 2), 'd': round(stoch_d, 2)}
-    
-    @classmethod
-    def calculate_all(cls, kline_data: List[dict], indicators: List[str]) -> dict:
-        """Calculate all requested indicators"""
-        if not kline_data:
+    def calculate_all(ohlcv: List) -> dict:
+        if not ohlcv or len(ohlcv) < 20:
             return {}
         
-        closes = [k['close'] for k in kline_data]
-        highs = [k['high'] for k in kline_data]
-        lows = [k['low'] for k in kline_data]
+        opens = [c[1] for c in ohlcv]
+        highs = [c[2] for c in ohlcv]
+        lows = [c[3] for c in ohlcv]
+        closes = [c[4] for c in ohlcv]
+        volumes = [c[5] for c in ohlcv]
         
-        result = {}
-        
-        if 'RSI' in indicators:
-            result['rsi'] = round(cls.calculate_rsi(closes), 2)
-        
-        if 'ADX' in indicators:
-            result['adx'] = round(cls.calculate_adx(highs, lows, closes), 2)
-        
-        if 'CHOP' in indicators:
-            result['chop'] = round(cls.calculate_chop(highs, lows, closes), 2)
-        
-        if 'KAMA' in indicators:
-            result['kama'] = round(cls.calculate_kama(closes), 2)
-        
-        if 'EMA' in indicators:
-            result['ema_20'] = round(cls.calculate_ema(closes, 20), 2)
-            result['ema_50'] = round(cls.calculate_ema(closes, 50), 2)
-        
-        if 'SMA' in indicators:
-            result['sma_20'] = round(sum(closes[-20:]) / min(20, len(closes)), 2)
-            result['sma_50'] = round(sum(closes[-50:]) / min(50, len(closes)), 2)
-        
-        if 'BOLLINGER' in indicators:
-            bb = cls.calculate_bollinger(closes)
-            result['bb_upper'] = round(bb['upper'], 2)
-            result['bb_middle'] = round(bb['middle'], 2)
-            result['bb_lower'] = round(bb['lower'], 2)
-        
-        if 'MACD' in indicators:
-            macd = cls.calculate_macd(closes)
-            result['macd'] = macd['macd']
-            result['macd_signal'] = macd['signal']
-            result['macd_histogram'] = macd['histogram']
-        
-        if 'ATR' in indicators:
-            result['atr'] = round(cls.calculate_atr(highs, lows, closes), 4)
-        
-        if 'STOCH_RSI' in indicators:
-            stoch = cls.calculate_stoch_rsi(closes)
-            result['stoch_k'] = stoch['k']
-            result['stoch_d'] = stoch['d']
-        
-        # Always include current price info
-        result['current_price'] = closes[-1] if closes else 0
-        result['price_change_1h'] = round(((closes[-1] / closes[-4]) - 1) * 100, 2) if len(closes) >= 4 else 0
-        result['price_change_24h'] = round(((closes[-1] / closes[-24]) - 1) * 100, 2) if len(closes) >= 24 else 0
-        
-        return result
+        return {
+            'rsi': round(IndicatorCalculator.calculate_rsi(closes), 2),
+            'adx': round(IndicatorCalculator.calculate_adx(highs, lows, closes), 2),
+            'chop': round(IndicatorCalculator.calculate_chop(highs, lows, closes), 2),
+            'kama': round(IndicatorCalculator.calculate_kama(closes), 2),
+            'ema_9': round(IndicatorCalculator.calculate_ema(closes, 9), 2),
+            'ema_21': round(IndicatorCalculator.calculate_ema(closes, 21), 2),
+            'sma_50': round(sum(closes[-50:]) / min(50, len(closes)), 2),
+            'current_price': closes[-1],
+            'volume': volumes[-1],
+        }
+
+
+# ============== Global Instances ==============
+
+connection_manager = ConnectionManager()
+exchange_manager = ExchangeManager()
+running_agents: Dict[str, asyncio.Task] = {}
 
 
 # ============== FastAPI App ==============
 
-connection_manager = ConnectionManager()
-exchange_manager = ExchangeManager()
-
-agent_manager = None
-ai_models: Dict[str, AIModelConfig] = {}
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global agent_manager
-    logger.info("Starting CryptoAgent Backend...")
-    
-    try:
-        from trading_agent import AgentManager
-        agent_manager = AgentManager(exchange_manager, connection_manager)
-        logger.info("AgentManager initialized with OpenAI Agents SDK")
-    except ImportError as e:
-        logger.warning(f"Could not import AgentManager: {e}")
-        logger.info("Running in basic mode without OpenAI Agents SDK")
-    
+    init_database()
+    logger.info("Database initialized")
+    ActivityLogRepository.log('info', 'Backend server started')
     yield
-    
-    logger.info("Shutting down...")
+    # Cleanup
+    for agent_id, task in running_agents.items():
+        task.cancel()
     for exchange_id in list(exchange_manager.exchanges.keys()):
         await exchange_manager.disconnect_exchange(exchange_id)
+    ActivityLogRepository.log('info', 'Backend server stopped')
 
-app = FastAPI(
-    title="CryptoAgent Backend",
-    description="AI-powered cryptocurrency trading backend with OpenAI Agents SDK",
-    version="2.0.0",
-    lifespan=lifespan
-)
+
+app = FastAPI(title="CryptoAgent API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -592,513 +424,436 @@ app.add_middleware(
 )
 
 
-# ============== REST API Endpoints ==============
-
-@app.get("/")
-async def root():
-    return {
-        "status": "running",
-        "service": "CryptoAgent Backend",
-        "version": "2.0.0",
-        "features": ["OpenAI Agents SDK", "Tool-based Trading", "Multi-Exchange Support"]
-    }
-
+# ============== Health Check ==============
 
 @app.get("/health")
 async def health_check():
     return {
         "status": "healthy",
-        "timestamp": datetime.utcnow().isoformat(),
-        "exchanges_connected": len(exchange_manager.exchanges),
-        "models_registered": len(ai_models),
-        "agents_running": len([a for a in agent_manager.agents.values() if a.is_running]) if agent_manager else 0,
-        "websocket_clients": len(connection_manager.active_connections)
+        "timestamp": datetime.now().isoformat(),
+        "active_connections": len(connection_manager.active_connections),
+        "connected_exchanges": len(exchange_manager.exchanges),
+        "running_agents": len(running_agents)
     }
 
 
-# AI Models
-@app.post("/api/models")
-async def register_model(config: AIModelConfig):
-    ai_models[config.id] = config
-    return {"status": "success", "model_id": config.id}
-
+# ============== AI Models API ==============
 
 @app.get("/api/models")
-async def list_models():
-    return {
-        "models": [
-            {"id": m.id, "name": m.name, "provider": m.provider, "model": m.model}
-            for m in ai_models.values()
-        ]
+async def get_models():
+    models = AIModelRepository.get_all()
+    # Mask API keys
+    for model in models:
+        model['api_key'] = '***' + model['api_key'][-4:] if model.get('api_key') else ''
+    return models
+
+
+@app.post("/api/models")
+async def create_model(config: AIModelConfig):
+    model_id = config.id or f"model_{uuid.uuid4().hex[:8]}"
+    model_data = {
+        'id': model_id,
+        'name': config.name,
+        'provider': config.provider,
+        'api_key': config.api_key,
+        'base_url': config.base_url,
+        'model': config.model,
+        'status': 'active'
     }
+    result = AIModelRepository.create(model_data)
+    ActivityLogRepository.log('info', f"Created AI model: {config.name}", details={'model_id': model_id})
+    return result
 
 
 @app.delete("/api/models/{model_id}")
 async def delete_model(model_id: str):
-    if model_id in ai_models:
-        del ai_models[model_id]
-    return {"status": "success"}
+    if AIModelRepository.delete(model_id):
+        ActivityLogRepository.log('info', f"Deleted AI model", details={'model_id': model_id})
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Model not found")
 
 
-# Exchanges
-@app.post("/api/exchanges")
-async def connect_exchange(config: ExchangeConfig):
-    success = await exchange_manager.connect_exchange(config)
-    return {"status": "success" if success else "failed", "exchange_id": config.id}
-
+# ============== Exchanges API ==============
 
 @app.get("/api/exchanges")
-async def list_exchanges():
-    return {"exchanges": list(exchange_manager.exchanges.keys())}
+async def get_exchanges():
+    exchanges = ExchangeRepository.get_all()
+    # Mask keys
+    for ex in exchanges:
+        ex['api_key'] = '***' + ex['api_key'][-4:] if ex.get('api_key') else ''
+        ex['secret_key'] = '***' + ex['secret_key'][-4:] if ex.get('secret_key') else ''
+    return exchanges
+
+
+@app.post("/api/exchanges")
+async def create_exchange(config: ExchangeConfig):
+    exchange_id = config.id or f"ex_{uuid.uuid4().hex[:8]}"
+    exchange_data = {
+        'id': exchange_id,
+        'name': config.name,
+        'exchange': config.exchange,
+        'api_key': config.api_key,
+        'secret_key': config.secret_key,
+        'passphrase': config.passphrase,
+        'testnet': config.testnet,
+        'status': 'disconnected'
+    }
+    result = ExchangeRepository.create(exchange_data)
+    ActivityLogRepository.log('info', f"Created exchange: {config.name}", details={'exchange_id': exchange_id})
+    return result
+
+
+@app.post("/api/exchanges/{exchange_id}/connect")
+async def connect_exchange(exchange_id: str):
+    config = ExchangeRepository.get_by_id(exchange_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Exchange not found")
+    
+    success = await exchange_manager.connect_exchange(config)
+    if success:
+        return {"success": True, "status": "connected"}
+    raise HTTPException(status_code=500, detail="Failed to connect to exchange")
+
+
+@app.post("/api/exchanges/{exchange_id}/disconnect")
+async def disconnect_exchange(exchange_id: str):
+    await exchange_manager.disconnect_exchange(exchange_id)
+    return {"success": True, "status": "disconnected"}
 
 
 @app.delete("/api/exchanges/{exchange_id}")
-async def disconnect_exchange(exchange_id: str):
+async def delete_exchange(exchange_id: str):
     await exchange_manager.disconnect_exchange(exchange_id)
-    return {"status": "success"}
+    if ExchangeRepository.delete(exchange_id):
+        ActivityLogRepository.log('info', f"Deleted exchange", details={'exchange_id': exchange_id})
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Exchange not found")
+
+
+# ============== Agents API ==============
+
+@app.get("/api/agents")
+async def get_agents():
+    return AgentRepository.get_all()
+
+
+@app.get("/api/agents/{agent_id}")
+async def get_agent(agent_id: str):
+    agent = AgentRepository.get_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
 
 
 @app.post("/api/agents")
 async def create_agent(config: AgentConfig):
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    if config.model_id not in ai_models:
-        raise HTTPException(status_code=404, detail="Model not found")
-    
-    if config.exchange_id not in exchange_manager.exchanges:
-        raise HTTPException(status_code=404, detail="Exchange not connected")
-    
-    try:
-        from trading_agent import TradingContext
-        
-        trading_context = TradingContext(
-            exchange_id=config.exchange_id,
-            symbol=config.symbol,
-            timeframe=config.timeframe,
-            max_position_size=config.max_position_size,
-            risk_per_trade=config.risk_per_trade,
-            default_leverage=config.default_leverage
-        )
-        
-        model_config = ai_models[config.model_id]
-        
-        agent_manager.create_agent(
-            agent_id=config.id,
-            model_config={
-                'model': model_config.model,
-                'api_key': model_config.api_key,
-                'provider': model_config.provider
-            },
-            trading_context=trading_context,
-            system_prompt=config.prompt
-        )
-        
-        return {"status": "success", "agent_id": config.id}
-        
-    except Exception as e:
-        logger.error(f"Failed to create agent: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/agents")
-async def list_agents():
-    if not agent_manager:
-        return {"agents": []}
-    return {"agents": agent_manager.get_all_status()}
+    agent_id = config.id or f"agent_{uuid.uuid4().hex[:8]}"
+    agent_data = {
+        'id': agent_id,
+        'name': config.name,
+        'model_id': config.model_id,
+        'exchange_id': config.exchange_id,
+        'symbol': config.symbol,
+        'timeframe': config.timeframe,
+        'indicators': config.indicators,
+        'prompt': config.prompt,
+        'max_position_size': config.max_position_size,
+        'risk_per_trade': config.risk_per_trade,
+        'default_leverage': config.default_leverage,
+        'status': 'stopped'
+    }
+    result = AgentRepository.create(agent_data)
+    ActivityLogRepository.log('info', f"Created agent: {config.name}", agent_id=agent_id)
+    return result
 
 
 @app.post("/api/agents/{agent_id}/start")
-async def start_agent(agent_id: str, interval: int = 60):
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
+async def start_agent(agent_id: str):
+    agent = AgentRepository.get_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
     
-    # Calculate interval based on timeframe if agent exists
-    agent = agent_manager.get_agent(agent_id)
-    if agent:
-        timeframe = agent.trading_context.timeframe
-        intervals = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400}
-        interval = intervals.get(timeframe, interval)
+    if agent_id in running_agents:
+        return {"success": True, "status": "already_running"}
     
-    success = await agent_manager.start_agent(agent_id, interval)
-    return {"status": "success" if success else "failed"}
+    # Start agent task
+    task = asyncio.create_task(run_agent_loop(agent_id))
+    running_agents[agent_id] = task
+    
+    AgentRepository.update(agent_id, {'status': 'running'})
+    ActivityLogRepository.log('info', f"Started agent", agent_id=agent_id)
+    
+    return {"success": True, "status": "running"}
 
 
 @app.post("/api/agents/{agent_id}/stop")
 async def stop_agent(agent_id: str):
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
+    if agent_id in running_agents:
+        running_agents[agent_id].cancel()
+        del running_agents[agent_id]
     
-    agent_manager.stop_agent(agent_id)
-    return {"status": "success"}
-
-
-@app.get("/api/agents/{agent_id}")
-async def get_agent_status(agent_id: str):
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
+    AgentRepository.update(agent_id, {'status': 'stopped'})
+    ActivityLogRepository.log('info', f"Stopped agent", agent_id=agent_id)
     
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    return {
-        "agent_id": agent_id,
-        "is_running": agent.is_running,
-        "symbol": agent.trading_context.symbol,
-        "timeframe": agent.trading_context.timeframe,
-        "max_position_size": agent.trading_context.max_position_size,
-        "last_analysis": agent.last_analysis
-    }
+    return {"success": True, "status": "stopped"}
 
 
 @app.delete("/api/agents/{agent_id}")
 async def delete_agent(agent_id: str):
-    if agent_manager:
-        agent_manager.remove_agent(agent_id)
-    return {"status": "success"}
-
-
-@app.post("/api/agents/{agent_id}/analyze")
-async def trigger_analysis(agent_id: str):
-    """Manually trigger an analysis cycle for testing"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
+    if agent_id in running_agents:
+        running_agents[agent_id].cancel()
+        del running_agents[agent_id]
     
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    try:
-        # Fetch market data
-        klines = await exchange_manager.fetch_ohlcv(
-            agent.trading_context.exchange_id,
-            agent.trading_context.symbol,
-            agent.trading_context.timeframe,
-            100
-        )
-        
-        # Calculate indicators
-        indicators = IndicatorCalculator.calculate_all(
-            klines,
-            ['RSI', 'ADX', 'CHOP', 'KAMA', 'BOLLINGER', 'MACD', 'ATR', 'EMA', 'STOCH_RSI']
-        )
-        
-        # Run analysis
-        result = await agent.analyze({
-            'klines': klines,
-            'indicators': indicators
-        })
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"Manual analysis error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    if AgentRepository.delete(agent_id):
+        ActivityLogRepository.log('info', f"Deleted agent", agent_id=agent_id)
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Agent not found")
 
 
-# Orders
-@app.post("/api/orders")
-async def place_order(order: OrderRequest):
-    result = await exchange_manager.place_order(
-        order.agent_id,
-        order.symbol,
-        order.side,
-        order.order_type,
-        order.amount,
-        order.price
-    )
-    return result
+# ============== Agent Data API ==============
 
-
-# Market Data
-@app.get("/api/ticker/{exchange_id}/{symbol}")
-async def get_ticker(exchange_id: str, symbol: str):
-    ticker = await exchange_manager.get_ticker(exchange_id, symbol)
-    return {"ticker": ticker}
-
-
-@app.get("/api/klines/{exchange_id}/{symbol}/{timeframe}")
-async def get_klines(exchange_id: str, symbol: str, timeframe: str, limit: int = 100):
-    klines = await exchange_manager.fetch_ohlcv(exchange_id, symbol, timeframe, limit)
-    return {"klines": klines}
-
-
-@app.get("/api/indicators")
-async def calculate_indicators(
-    exchange_id: str,
-    symbol: str,
-    timeframe: str,
-    indicators: str = "RSI,ADX,CHOP,KAMA,BOLLINGER,MACD,ATR"
-):
-    klines = await exchange_manager.fetch_ohlcv(exchange_id, symbol, timeframe, 100)
-    indicator_list = [i.strip().upper() for i in indicators.split(',')]
-    result = IndicatorCalculator.calculate_all(klines, indicator_list)
-    return {"indicators": result}
-
-
-# Agent Details
 @app.get("/api/agents/{agent_id}/positions")
 async def get_agent_positions(agent_id: str):
-    """Get open positions for an agent"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
+    agent = AgentRepository.get_by_id(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    exchange_id = agent.trading_context.exchange_id
-    if exchange_id not in exchange_manager.exchanges:
-        return {"positions": []}
+    # Try to get live positions from exchange
+    if agent['exchange_id'] in exchange_manager.exchanges:
+        live_positions = await exchange_manager.get_positions(agent['exchange_id'], agent['symbol'])
+        if live_positions:
+            return live_positions
     
-    try:
-        exchange = exchange_manager.exchanges[exchange_id]
-        positions = await exchange.fetch_positions()
-        
-        result = []
-        for pos in positions:
-            if float(pos.get('contracts', 0)) > 0:
-                entry_price = float(pos.get('entryPrice', 0))
-                current_price = float(pos.get('markPrice', entry_price))
-                size = float(pos.get('contracts', 0))
-                side = pos.get('side', 'long')
-                leverage = int(pos.get('leverage', 1))
-                
-                # Calculate PnL
-                if side == 'long':
-                    unrealized_pnl = (current_price - entry_price) * size
-                    pnl_percent = ((current_price - entry_price) / entry_price) * 100 * leverage
-                else:
-                    unrealized_pnl = (entry_price - current_price) * size
-                    pnl_percent = ((entry_price - current_price) / entry_price) * 100 * leverage
-                
-                result.append({
-                    "symbol": pos.get('symbol', ''),
-                    "side": side,
-                    "size": size,
-                    "entryPrice": entry_price,
-                    "currentPrice": current_price,
-                    "leverage": leverage,
-                    "unrealizedPnl": unrealized_pnl,
-                    "unrealizedPnlPercent": pnl_percent,
-                    "liquidationPrice": float(pos.get('liquidationPrice', 0)),
-                    "margin": float(pos.get('initialMargin', 0)),
-                    "timestamp": pos.get('timestamp', datetime.now().isoformat())
-                })
-        
-        return {"positions": result}
-        
-    except Exception as e:
-        logger.error(f"Failed to get positions: {e}")
-        return {"positions": [], "error": str(e)}
+    # Fall back to database positions
+    return PositionRepository.get_open_by_agent(agent_id)
 
 
 @app.get("/api/agents/{agent_id}/balance")
 async def get_agent_balance(agent_id: str):
-    """Get account balance for an agent's exchange"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
+    agent = AgentRepository.get_by_id(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    exchange_id = agent.trading_context.exchange_id
-    balance = await exchange_manager.get_balance(exchange_id)
-    
-    # Get positions for margin calculation
-    positions_data = await get_agent_positions(agent_id)
-    positions = positions_data.get("positions", [])
-    
-    total_margin = sum(p.get("margin", 0) for p in positions)
-    total_unrealized_pnl = sum(p.get("unrealizedPnl", 0) for p in positions)
+    if agent['exchange_id'] in exchange_manager.exchanges:
+        balance = await exchange_manager.get_balance(agent['exchange_id'])
+        if balance:
+            total = balance.get('total', {})
+            free = balance.get('free', {})
+            usdt_total = total.get('USDT', 0)
+            usdt_free = free.get('USDT', 0)
+            
+            balance_data = {
+                'total_balance': usdt_total,
+                'available_balance': usdt_free,
+                'unrealized_pnl': 0,
+                'realized_pnl': 0
+            }
+            
+            # Record balance history
+            BalanceHistoryRepository.record(agent_id, agent['exchange_id'], balance_data)
+            
+            return balance_data
     
     return {
-        "totalBalance": balance.get('total', 0),
-        "availableBalance": balance.get('free', 0),
-        "usedMargin": total_margin,
-        "unrealizedPnl": total_unrealized_pnl,
-        "realizedPnl": 0,  # Would need trade history to calculate
-        "todayPnl": 0,
-        "weekPnl": 0,
-        "monthPnl": 0
+        'total_balance': 0,
+        'available_balance': 0,
+        'unrealized_pnl': 0,
+        'realized_pnl': 0
     }
-
-
-@app.get("/api/agents/{agent_id}/conversations")
-async def get_agent_conversations(agent_id: str, limit: int = 50):
-    """Get conversation history for an agent"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    # Return stored conversation history
-    conversations = getattr(agent, 'conversation_history', [])
-    return {"conversations": conversations[-limit:]}
-
-
-@app.get("/api/agents/{agent_id}/tool-calls")
-async def get_agent_tool_calls(agent_id: str, limit: int = 50):
-    """Get tool call history for an agent"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    # Return stored tool call history
-    tool_calls = getattr(agent, 'tool_call_history', [])
-    return {"toolCalls": tool_calls[-limit:]}
 
 
 @app.get("/api/agents/{agent_id}/orders")
 async def get_agent_orders(agent_id: str, limit: int = 50):
-    """Get order history for an agent"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    exchange_id = agent.trading_context.exchange_id
-    symbol = agent.trading_context.symbol
-    
-    if exchange_id not in exchange_manager.exchanges:
-        return {"orders": []}
-    
-    try:
-        exchange = exchange_manager.exchanges[exchange_id]
-        
-        # Get open orders
-        open_orders = await exchange.fetch_open_orders(symbol)
-        
-        # Get closed orders (last 50)
-        closed_orders = await exchange.fetch_closed_orders(symbol, limit=limit)
-        
-        all_orders = []
-        for order in open_orders + closed_orders:
-            all_orders.append({
-                "id": order.get('id', ''),
-                "symbol": order.get('symbol', ''),
-                "side": order.get('side', ''),
-                "type": order.get('type', ''),
-                "amount": float(order.get('amount', 0)),
-                "price": float(order.get('price', 0)) if order.get('price') else None,
-                "filled": float(order.get('filled', 0)),
-                "status": order.get('status', ''),
-                "timestamp": order.get('timestamp', 0)
-            })
-        
-        # Sort by timestamp descending
-        all_orders.sort(key=lambda x: x.get('timestamp', 0), reverse=True)
-        
-        return {"orders": all_orders[:limit]}
-        
-    except Exception as e:
-        logger.error(f"Failed to get orders: {e}")
-        return {"orders": [], "error": str(e)}
+    return OrderRepository.get_by_agent(agent_id, limit)
 
 
-@app.get("/api/agents/{agent_id}/profit-history")
-async def get_agent_profit_history(agent_id: str, days: int = 30):
-    """Get profit history for chart display"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    # Return stored profit history or empty
-    profit_history = getattr(agent, 'profit_history', [])
-    return {"profitHistory": profit_history[-days:]}
+@app.get("/api/agents/{agent_id}/conversations")
+async def get_agent_conversations(agent_id: str, limit: int = 100):
+    return ConversationRepository.get_by_agent(agent_id, limit)
+
+
+@app.get("/api/agents/{agent_id}/tool-calls")
+async def get_agent_tool_calls(agent_id: str, limit: int = 50):
+    return ToolCallRepository.get_by_agent(agent_id, limit)
 
 
 @app.get("/api/agents/{agent_id}/signals")
 async def get_agent_signals(agent_id: str, limit: int = 50):
-    """Get signal history for an agent"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    # Return stored signals
-    signals = getattr(agent, 'signal_history', [])
-    return {"signals": signals[-limit:]}
+    return SignalRepository.get_by_agent(agent_id, limit)
+
+
+@app.get("/api/agents/{agent_id}/profit-history")
+async def get_agent_profit_history(agent_id: str, days: int = 30):
+    return BalanceHistoryRepository.get_history(agent_id, days)
 
 
 @app.get("/api/agents/{agent_id}/logs")
 async def get_agent_logs(agent_id: str, limit: int = 100):
-    """Get log entries for an agent"""
-    if not agent_manager:
-        raise HTTPException(status_code=503, detail="AgentManager not available")
-    
-    agent = agent_manager.get_agent(agent_id)
+    return ActivityLogRepository.get_recent(limit, agent_id)
+
+
+# ============== Market Data API ==============
+
+@app.get("/api/market/ticker/{exchange_id}/{symbol}")
+async def get_ticker(exchange_id: str, symbol: str):
+    ticker = await exchange_manager.get_ticker(exchange_id, symbol)
+    if ticker:
+        return ticker
+    raise HTTPException(status_code=404, detail="Ticker not available")
+
+
+@app.get("/api/market/klines/{exchange_id}/{symbol}/{timeframe}")
+async def get_klines(exchange_id: str, symbol: str, timeframe: str, limit: int = 100):
+    klines = await exchange_manager.get_klines(exchange_id, symbol, timeframe, limit)
+    return klines
+
+
+@app.get("/api/market/indicators/{exchange_id}/{symbol}/{timeframe}")
+async def get_indicators(exchange_id: str, symbol: str, timeframe: str):
+    klines = await exchange_manager.get_klines(exchange_id, symbol, timeframe, 100)
+    if klines:
+        return IndicatorCalculator.calculate_all(klines)
+    return {}
+
+
+# ============== Orders API ==============
+
+@app.post("/api/orders")
+async def create_order(request: OrderRequest):
+    agent = AgentRepository.get_by_id(request.agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    # Return stored logs
-    logs = getattr(agent, 'logs', [])
-    return {"logs": logs[-limit:]}
+    order_id = f"order_{uuid.uuid4().hex[:8]}"
+    
+    # Create order in database
+    order_data = {
+        'id': order_id,
+        'agent_id': request.agent_id,
+        'symbol': request.symbol,
+        'side': request.side,
+        'order_type': request.order_type,
+        'amount': request.amount,
+        'price': request.price,
+        'status': 'pending'
+    }
+    OrderRepository.create(order_data)
+    
+    # Execute on exchange
+    result = await exchange_manager.create_order(
+        agent['exchange_id'],
+        request.symbol,
+        request.order_type,
+        request.side,
+        request.amount,
+        request.price
+    )
+    
+    if result:
+        OrderRepository.update(order_id, {
+            'status': 'filled',
+            'exchange_order_id': result.get('id'),
+            'filled_amount': result.get('filled', request.amount),
+            'filled_price': result.get('average', request.price)
+        })
+        
+        # Log conversation
+        ConversationRepository.add_message(
+            request.agent_id,
+            'tool',
+            f"Order executed: {request.side} {request.amount} {request.symbol} @ {result.get('average', 'market')}"
+        )
+        
+        return {"success": True, "order": result}
+    else:
+        OrderRepository.update(order_id, {'status': 'failed'})
+        raise HTTPException(status_code=500, detail="Failed to create order")
 
 
-# ============== WebSocket Endpoint ==============
+# ============== Activity Logs API ==============
+
+@app.get("/api/activity")
+async def get_activity(limit: int = 100):
+    return ActivityLogRepository.get_recent(limit)
+
+
+# ============== WebSocket ==============
 
 @app.websocket("/ws/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):
     await connection_manager.connect(websocket, client_id)
-    
     try:
         while True:
             data = await websocket.receive_json()
             
-            if data['type'] == 'subscribe_kline':
-                # Start streaming kline data
-                exchange_id = data['exchange_id']
-                symbol = data['symbol']
-                timeframe = data['timeframe']
-                
-                async def send_klines():
-                    while client_id in connection_manager.active_connections:
-                        klines = await exchange_manager.fetch_ohlcv(
-                            exchange_id, symbol, timeframe, 100
-                        )
-                        indicators = IndicatorCalculator.calculate_all(
-                            klines, ['RSI', 'ADX', 'CHOP', 'KAMA', 'EMA', 'BOLLINGER', 'MACD']
-                        )
-                        await connection_manager.send_to_client(client_id, {
-                            'type': 'kline_update',
-                            'symbol': symbol,
-                            'timeframe': timeframe,
-                            'klines': klines[-50:],
-                            'indicators': indicators
-                        })
-                        await asyncio.sleep(10)  # Update every 10 seconds
-                
-                asyncio.create_task(send_klines())
+            if data.get('type') == 'subscribe_agent':
+                agent_id = data.get('agent_id')
+                # Handle agent subscription
                 await websocket.send_json({
                     'type': 'subscribed',
-                    'symbol': symbol,
-                    'timeframe': timeframe
+                    'agent_id': agent_id
                 })
             
-            elif data['type'] == 'ping':
+            elif data.get('type') == 'ping':
                 await websocket.send_json({'type': 'pong'})
-    
+                
     except WebSocketDisconnect:
         connection_manager.disconnect(client_id)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        connection_manager.disconnect(client_id)
 
+
+# ============== Agent Loop ==============
+
+async def run_agent_loop(agent_id: str):
+    """Main agent loop that monitors market and makes trading decisions"""
+    logger.info(f"Starting agent loop for {agent_id}")
+    
+    try:
+        while True:
+            agent = AgentRepository.get_by_id(agent_id)
+            if not agent or agent['status'] != 'running':
+                break
+            
+            exchange_id = agent['exchange_id']
+            symbol = agent['symbol']
+            timeframe = agent['timeframe']
+            
+            # Get market data
+            klines = await exchange_manager.get_klines(exchange_id, symbol, timeframe, 100)
+            if not klines:
+                await asyncio.sleep(10)
+                continue
+            
+            # Calculate indicators
+            indicators = IndicatorCalculator.calculate_all(klines)
+            
+            # Log analysis
+            ConversationRepository.add_message(
+                agent_id,
+                'system',
+                f"Market analysis: {symbol} @ {indicators.get('current_price', 'N/A')} | RSI: {indicators.get('rsi', 'N/A')} | ADX: {indicators.get('adx', 'N/A')}"
+            )
+            
+            # Broadcast to WebSocket clients
+            await connection_manager.broadcast({
+                'type': 'agent_update',
+                'agent_id': agent_id,
+                'indicators': indicators,
+                'timestamp': datetime.now().isoformat()
+            })
+            
+            # Sleep based on timeframe
+            sleep_map = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400}
+            await asyncio.sleep(sleep_map.get(timeframe, 60))
+            
+    except asyncio.CancelledError:
+        logger.info(f"Agent {agent_id} stopped")
+    except Exception as e:
+        logger.error(f"Agent {agent_id} error: {e}")
+        ActivityLogRepository.log('error', f"Agent error: {e}", agent_id=agent_id)
+        AgentRepository.update(agent_id, {'status': 'stopped'})
+
+
+# ============== Main ==============
 
 if __name__ == "__main__":
     import uvicorn
