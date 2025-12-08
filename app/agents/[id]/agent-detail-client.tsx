@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
+import useSWR from "swr"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
@@ -43,7 +44,7 @@ import {
   useAgentProfitHistory,
   useTicker,
 } from "@/hooks/use-agent-data"
-import { startAgent, stopAgent, triggerAnalysis } from "@/lib/api"
+import { startAgent, stopAgent, triggerAnalysis, getAgent } from "@/lib/api"
 import type { Position, AccountBalance, ConversationMessage, ToolCall, ProfitDataPoint } from "@/lib/types"
 
 const mockPositions: Position[] = [
@@ -141,11 +142,42 @@ interface AgentDetailClientProps {
   id: string
 }
 
+// Normalize agent data from API or store
+function normalizeAgent(data: any) {
+  if (!data) return null
+  return {
+    id: data.id,
+    name: data.name,
+    modelId: data.modelId || data.model_id,
+    exchangeId: data.exchangeId || data.exchange_id,
+    symbol: data.symbol,
+    timeframe: data.timeframe,
+    status: data.status,
+    indicators: data.indicators || [],
+    prompt: data.prompt,
+    performance: data.performance,
+    lastSignal: data.lastSignal,
+  }
+}
+
 export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const router = useRouter()
   const { agents, models, exchanges, updateAgent } = useAppStore()
 
-  const agent = agents.find((a) => a.id === id)
+  // Try to get agent from store first, then fetch from API
+  const storeAgent = agents.find((a) => a.id === id)
+  const { data: apiAgent, isLoading: isLoadingApiAgent } = useSWR(
+    !storeAgent ? `agent-${id}` : null,
+    async () => {
+      const result = await getAgent(id)
+      if (result.error || !result.data) return null
+      return normalizeAgent(result.data)
+    },
+    { revalidateOnFocus: false },
+  )
+
+  const agent = storeAgent ? normalizeAgent(storeAgent) : apiAgent
+
   const model = models.find((m) => m.id === agent?.modelId)
   const exchange = exchanges.find((e) => e.id === agent?.exchangeId)
 
@@ -160,12 +192,13 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { isConnected: backendConnected } = useBackendStatus()
 
   // Real data hooks - only fetch when backend is connected
-  const { positions: realPositions } = useAgentPositions(id, backendConnected)
-  const { balance: realBalance } = useAgentBalance(id, backendConnected)
-  const { conversations: realConversations } = useAgentConversations(id, backendConnected)
-  const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected)
-  const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected)
-  const { ticker } = useTicker(exchange?.id ?? "", agent?.symbol ?? "", backendConnected && !!exchange)
+  const { positions: realPositions } = useAgentPositions(id, backendConnected && !!agent)
+  const { balance: realBalance } = useAgentBalance(id, backendConnected && !!agent)
+  const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
+  const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected && !!agent)
+  const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected && !!agent)
+  const { ticker } = useTicker(exchange?.id ?? "", agent?.symbol ?? "", backendConnected && !!exchange && !!agent)
+
 
   // Use real data when available, otherwise use mock data
   const positions = backendConnected && realPositions.length > 0 ? realPositions : mockPositions
@@ -237,6 +270,21 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   }, [agent, backendConnected])
 
   if (!agent) {
+    if (isLoadingApiAgent) {
+      return (
+        <div className="flex min-h-screen">
+          <Sidebar />
+          <main className="flex-1 pl-64">
+            <Header title="Loading..." />
+            <div className="flex flex-col items-center justify-center p-12">
+              <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
+              <p className="mt-4 text-muted-foreground">Loading agent details...</p>
+            </div>
+          </main>
+        </div>
+      )
+    }
+
     return (
       <div className="flex min-h-screen">
         <Sidebar />
@@ -339,9 +387,9 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Total Balance</p>
-                    <p className="text-2xl font-bold text-foreground">${balance.totalBalance.toLocaleString()}</p>
+                    <p className="text-2xl font-bold text-foreground">${(balance?.totalBalance ?? 0).toLocaleString()}</p>
                     <p className="text-sm text-muted-foreground">
-                      ${balance.availableBalance.toLocaleString()} available
+                      ${(balance?.availableBalance ?? 0).toLocaleString()} available
                     </p>
                   </div>
                   <Wallet className="h-8 w-8 text-primary" />

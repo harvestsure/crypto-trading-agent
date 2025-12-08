@@ -106,7 +106,18 @@ export function useAgentBalance(agentId: string, enabled = true) {
     async () => {
       const result = await getAgentBalance(agentId)
       if (result.error || !result.data) return null
-      return result.data as AccountBalance
+      // Normalize snake_case to camelCase
+      const raw = result.data as any
+      return {
+        totalBalance: raw.total_balance ?? raw.totalBalance ?? 0,
+        availableBalance: raw.available_balance ?? raw.availableBalance ?? 0,
+        usedMargin: raw.used_margin ?? raw.usedMargin ?? 0,
+        unrealizedPnl: raw.unrealized_pnl ?? raw.unrealizedPnl ?? 0,
+        realizedPnl: raw.realized_pnl ?? raw.realizedPnl ?? 0,
+        todayPnl: raw.today_pnl ?? raw.todayPnl ?? 0,
+        weekPnl: raw.week_pnl ?? raw.weekPnl ?? 0,
+        monthPnl: raw.month_pnl ?? raw.monthPnl ?? 0,
+      } as AccountBalance
     },
     { refreshInterval: 5000 },
   )
