@@ -2,7 +2,7 @@
 
 import useSWR from "swr"
 import {
-  getAgentStatus,
+  getAgent,
   getAgentPositions,
   getAgentBalance,
   getAgentConversations,
@@ -60,7 +60,11 @@ export function useBackendStatus() {
 export function useAgentStatus(agentId: string, enabled = true) {
   const { data, error, isLoading, mutate } = useSWR(
     enabled ? `agent-status-${agentId}` : null,
-    () => fetcher(`agent-status-${agentId}`, () => getAgentStatus(agentId)),
+    async () => {
+      const result = await getAgent(agentId)
+      if (result.error || !result.data) return null
+      return result.data.status ?? null
+    },
     { refreshInterval: 5000 },
   )
 

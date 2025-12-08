@@ -473,6 +473,18 @@ async def delete_model(model_id: str):
     raise HTTPException(status_code=404, detail="Model not found")
 
 
+@app.put("/api/models/{model_id}")
+async def update_model(model_id: str, data: dict):
+    # Accepts partial updates (e.g., {"status": "inactive"})
+    existing = AIModelRepository.get_by_id(model_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Model not found")
+
+    updated = AIModelRepository.update(model_id, data)
+    ActivityLogRepository.log('info', f"Updated AI model", details={'model_id': model_id, 'data': data})
+    return updated
+
+
 # ============== Exchanges API ==============
 
 @app.get("/api/exchanges")

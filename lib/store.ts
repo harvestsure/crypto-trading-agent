@@ -2,6 +2,38 @@ import { create } from "zustand"
 import * as api from "@/lib/api"
 
 interface AppState {
+  // Collections
+  models: Array<{
+    id: string
+    name: string
+    provider?: string
+    model?: string
+    status?: string
+  }>
+
+  exchanges: Array<{
+    id: string
+    name: string
+    exchange?: string
+    status?: string
+  }>
+
+  agents: Array<{
+    id: string
+    name: string
+    modelId: string
+    exchangeId: string
+    symbol?: string
+    timeframe?: string
+    status?: string
+    performance?: { total_trades?: number; win_rate?: number; pnl?: number }
+  }>
+
+  // Fetchers
+  fetchModels: () => Promise<void>
+  fetchExchanges: () => Promise<void>
+  fetchAgents: () => Promise<void>
+
   // Loading states
   isCreatingModel: boolean
   isCreatingExchange: boolean
@@ -53,6 +85,39 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>()((set) => ({
+  // Collections
+  models: [],
+  exchanges: [],
+  agents: [],
+
+  // Fetchers
+  fetchModels: async () => {
+    const result = await api.getModels()
+    if (result.error) return
+    const payload = result.data
+    if (!payload) return
+    const list = Array.isArray(payload) ? payload : (payload as any).models ?? []
+    if (!Array.isArray(list)) return
+    set({ models: list.map((m: any) => ({ id: m.id, name: m.name, provider: m.provider, model: m.model, status: m.status })) })
+  },
+  fetchExchanges: async () => {
+    const result = await api.getExchanges()
+    if (result.error) return
+    const payload = result.data
+    if (!payload) return
+    const list = Array.isArray(payload) ? payload : (payload as any).exchanges ?? []
+    if (!Array.isArray(list)) return
+    set({ exchanges: list.map((e: any) => ({ id: e.id, name: e.name, exchange: e.exchange, status: e.status })) })
+  },
+  fetchAgents: async () => {
+    const result = await api.getAgents()
+    if (result.error) return
+    const payload = result.data
+    if (!payload) return
+    const list = Array.isArray(payload) ? payload : (payload as any).agents ?? []
+    if (!Array.isArray(list)) return
+    set({ agents: list.map((a: any) => ({ id: a.id, name: a.name, modelId: a.model_id, exchangeId: a.exchange_id, symbol: a.symbol, timeframe: a.timeframe, status: a.status, performance: a.performance })) })
+  },
   isCreatingModel: false,
   isCreatingExchange: false,
   isCreatingAgent: false,

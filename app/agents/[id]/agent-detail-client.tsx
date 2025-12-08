@@ -149,6 +149,14 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const model = models.find((m) => m.id === agent?.modelId)
   const exchange = exchanges.find((e) => e.id === agent?.exchangeId)
 
+  // Normalize/defensive reads for agent fields coming from the store (snake_case vs camelCase)
+  const indicators: string[] = ((agent as any)?.indicators as string[]) ?? []
+  const perfRaw = (agent as any)?.performance ?? {}
+  const totalTrades: number = (perfRaw?.totalTrades ?? perfRaw?.total_trades ?? 0) as number
+  const winRate: number = (perfRaw?.winRate ?? perfRaw?.win_rate ?? 0) as number
+  const pnlFromPerf: number = perfRaw?.pnl ?? 0
+  const lastSignal = (agent as any)?.lastSignal ?? null
+
   const { isConnected: backendConnected } = useBackendStatus()
 
   // Real data hooks - only fetch when backend is connected
@@ -246,7 +254,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   }
 
   const isRunning = agent.status === "running"
-  const pnl = agent.performance?.pnl ?? 0
+  const pnl = pnlFromPerf ?? 0
   const isProfitable = pnl >= 0
 
   return (
@@ -350,7 +358,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                       {isProfitable ? "+" : ""}
                       {pnl.toFixed(2)}%
                     </p>
-                    <p className="text-sm text-muted-foreground">{agent.performance?.totalTrades ?? 0} trades</p>
+                    <p className="text-sm text-muted-foreground">{totalTrades} trades</p>
                   </div>
                   {isProfitable ? (
                     <TrendingUp className="h-8 w-8 text-success" />
@@ -366,7 +374,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm text-muted-foreground">Win Rate</p>
-                    <p className="text-2xl font-bold text-foreground">{agent.performance?.winRate ?? 0}%</p>
+                    <p className="text-2xl font-bold text-foreground">{winRate}%</p>
                     <p className="text-sm text-muted-foreground">Last 30 days</p>
                   </div>
                   <Target className="h-8 w-8 text-primary" />
@@ -380,10 +388,10 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   <div>
                     <p className="text-sm text-muted-foreground">Last Signal</p>
                     <p className="text-2xl font-bold text-foreground capitalize">
-                      {agent.lastSignal?.action ?? "None"}
+                      {lastSignal?.action ?? "None"}
                     </p>
                     <p className="text-sm text-muted-foreground">
-                      {agent.lastSignal ? new Date(agent.lastSignal.timestamp).toLocaleTimeString() : "No signals yet"}
+                      {lastSignal ? new Date((lastSignal as any).timestamp).toLocaleTimeString() : "No signals yet"}
                     </p>
                   </div>
                   <Clock className="h-8 w-8 text-primary" />
@@ -420,7 +428,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <KlineChart symbol={agent.symbol} timeframe={agent.timeframe} />
+                  <KlineChart symbol={agent.symbol ?? ""} timeframe={agent.timeframe ?? "1h"} />
                 </CardContent>
               </Card>
               <ProfitChart data={profitData} title="30-Day Performance" />
@@ -429,7 +437,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
             {/* Positions & Indicators Panel */}
             <div className="space-y-6">
               <PositionPanel positions={positions} balance={balance} />
-              <IndicatorPanel indicators={agent.indicators} />
+              <IndicatorPanel indicators={indicators} />
             </div>
 
             {/* AI Conversation & Tools */}
@@ -490,17 +498,17 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                     <div className="rounded-lg border border-border p-4">
                       <p className="text-sm font-medium text-muted-foreground mb-2">Indicators</p>
                       <div className="flex flex-wrap gap-2">
-                        {agent.indicators.map((ind) => (
-                          <Badge key={ind} variant="secondary">
-                            {ind}
-                          </Badge>
-                        ))}
+                                {indicators.map((ind: string) => (
+                                  <Badge key={ind} variant="secondary">
+                                    {ind}
+                                  </Badge>
+                                ))}
                       </div>
                     </div>
                     <div className="rounded-lg border border-border p-4">
                       <p className="text-sm font-medium text-muted-foreground mb-2">System Prompt</p>
                       <pre className="whitespace-pre-wrap rounded bg-secondary p-3 text-xs text-foreground font-mono">
-                        {agent.prompt}
+                        {(agent as any).prompt ?? ""}
                       </pre>
                     </div>
                   </CardContent>

@@ -91,20 +91,53 @@ function transformAgent(data: {
 // SWR fetcher functions
 async function fetchModels(): Promise<AIModel[]> {
   const result = await api.getModels()
-  if (result.error || !result.data) return []
-  return result.data.models.map(transformModel)
+  if (result.error) {
+    console.error("fetchModels error:", result.error)
+    return []
+  }
+  // Backend may return either an array or an object with `models` key.
+  const payload = result.data
+  if (!payload) {
+    console.warn("fetchModels: empty response", result)
+    return []
+  }
+  let list: any[] = []
+  if (Array.isArray(payload)) {
+    list = payload
+  } else if (Array.isArray((payload as any).models)) {
+    list = (payload as any).models
+  } else {
+    console.warn("fetchModels: unexpected response format", result)
+    return []
+  }
+
+  return list.map(transformModel)
 }
 
 async function fetchExchanges(): Promise<Exchange[]> {
   const result = await api.getExchanges()
-  if (result.error || !result.data) return []
-  return result.data.exchanges.map(transformExchange)
+  if (result.error) {
+    console.error("fetchExchanges error:", result.error)
+    return []
+  }
+  const payload = result.data
+  if (!payload) return []
+  const list = Array.isArray(payload) ? payload : (payload as any).exchanges ?? []
+  if (!Array.isArray(list)) return []
+  return list.map(transformExchange)
 }
 
 async function fetchAgents(): Promise<TradingAgent[]> {
   const result = await api.getAgents()
-  if (result.error || !result.data) return []
-  return result.data.agents.map(transformAgent)
+  if (result.error) {
+    console.error("fetchAgents error:", result.error)
+    return []
+  }
+  const payload = result.data
+  if (!payload) return []
+  const list = Array.isArray(payload) ? payload : (payload as any).agents ?? []
+  if (!Array.isArray(list)) return []
+  return list.map(transformAgent)
 }
 
 // SWR Hooks

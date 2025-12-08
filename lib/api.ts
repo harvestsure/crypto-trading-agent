@@ -139,6 +139,19 @@ export async function connectExchange(exchange: {
   })
 }
 
+// Backwards-compatible alias used by client store
+export async function createExchange(exchange: {
+  id: string
+  name: string
+  exchange: string
+  api_key: string
+  secret_key: string
+  passphrase?: string
+  testnet: boolean
+}) {
+  return connectExchange(exchange)
+}
+
 export async function updateExchange(exchangeId: string, data: { status?: string }) {
   return fetchApi<{ status: string }>(`/api/exchanges/${exchangeId}`, {
     method: "PUT",
@@ -150,6 +163,11 @@ export async function disconnectExchange(exchangeId: string) {
   return fetchApi<{ status: string }>(`/api/exchanges/${exchangeId}`, {
     method: "DELETE",
   })
+}
+
+// Backwards-compatible alias used by client store
+export async function deleteExchange(exchangeId: string) {
+  return disconnectExchange(exchangeId)
 }
 
 // ============== Agents ==============
@@ -352,6 +370,14 @@ export async function getAgentLogs(agentId: string, limit = 100) {
       timestamp: string
     }>
   }>(`/api/agents/${agentId}/logs?limit=${limit}`)
+}
+
+export async function startAgent(agentId: string) {
+  return fetchApi<{ status: string }>(`/api/agents/${agentId}/start`, { method: "POST" })
+}
+
+export async function stopAgent(agentId: string) {
+  return fetchApi<{ status: string }>(`/api/agents/${agentId}/stop`, { method: "POST" })
 }
 
 // ============== Orders ==============

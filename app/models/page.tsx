@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useEffect } from "react"
 import { useModels } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
@@ -16,6 +17,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function ModelsPage() {
   const { models, isLoading, mutate } = useModels()
   const { updateModel, deleteModel } = useAppStore()
+
+  useEffect(() => {
+    // Ensure we fetch models on mount and surface if the list is empty
+    mutate()
+  }, [mutate])
   const [isCreateOpen, setIsCreateOpen] = useState(false)
 
   const handleDelete = async (id: string) => {
