@@ -1,9 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useAppStore } from "@/lib/store"
+import { useModels, useExchanges } from "@/hooks/use-data"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -18,11 +18,12 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
-import { X } from "lucide-react"
+import { X, Loader2 } from "lucide-react"
 
 interface CreateAgentModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onSuccess?: () => void // Added onSuccess callback for refetching
 }
 
 const timeframes = [
@@ -58,8 +59,11 @@ Respond in JSON format:
   "stopLoss": number (percentage)
 }`
 
-export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) {
-  const { addAgent, models, exchanges } = useAppStore()
+export function CreateAgentModal({ open, onOpenChange, onSuccess }: CreateAgentModalProps) {
+  const { models } = useModels()
+  const { exchanges } = useExchanges()
+  const { createAgent, isCreatingAgent } = useAppStore()
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     modelId: "",
@@ -79,29 +83,35 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
     }))
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    addAgent({
-      id: crypto.randomUUID(),
-      ...formData,
-      status: "stopped",
-      createdAt: new Date(),
-      performance: {
-        totalTrades: 0,
-        winRate: 0,
-        pnl: 0,
-      },
+    setError(null)
+
+    const result = await createAgent({
+      name: formData.name,
+      modelId: formData.modelId,
+      exchangeId: formData.exchangeId,
+      symbol: formData.symbol,
+      timeframe: formData.timeframe,
+      indicators: formData.indicators,
+      prompt: formData.prompt,
     })
-    setFormData({
-      name: "",
-      modelId: "",
-      exchangeId: "",
-      symbol: "BTC/USDT",
-      timeframe: "1h",
-      indicators: ["RSI", "ADX", "CHOP"],
-      prompt: defaultPrompt,
-    })
-    onOpenChange(false)
+
+    if (result.success) {
+      setFormData({
+        name: "",
+        modelId: "",
+        exchangeId: "",
+        symbol: "BTC/USDT",
+        timeframe: "1h",
+        indicators: ["RSI", "ADX", "CHOP"],
+        prompt: defaultPrompt,
+      })
+      onOpenChange(false)
+      onSuccess?.()
+    } else {
+      setError(result.error || "Failed to create agent")
+    }
   }
 
   return (
@@ -113,6 +123,8 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
+            {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
+
             <div className="grid gap-2">
               <Label htmlFor="name">Agent Name</Label>
               <Input
@@ -121,6 +133,7 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
+                disabled={isCreatingAgent}
               />
             </div>
 
@@ -130,6 +143,7 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                 <Select
                   value={formData.modelId}
                   onValueChange={(value) => setFormData({ ...formData, modelId: value })}
+                  disabled={isCreatingAgent}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select model" />
@@ -149,6 +163,7 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                 <Select
                   value={formData.exchangeId}
                   onValueChange={(value) => setFormData({ ...formData, exchangeId: value })}
+                  disabled={isCreatingAgent}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Select exchange" />
@@ -173,6 +188,7 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                   value={formData.symbol}
                   onChange={(e) => setFormData({ ...formData, symbol: e.target.value })}
                   required
+                  disabled={isCreatingAgent}
                 />
               </div>
 
@@ -183,6 +199,7 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                   onValueChange={(value: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d") =>
                     setFormData({ ...formData, timeframe: value })
                   }
+                  disabled={isCreatingAgent}
                 >
                   <SelectTrigger>
                     <SelectValue />
@@ -206,7 +223,7 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                     key={indicator}
                     variant={formData.indicators.includes(indicator) ? "default" : "outline"}
                     className="cursor-pointer"
-                    onClick={() => toggleIndicator(indicator)}
+                    onClick={() => !isCreatingAgent && toggleIndicator(indicator)}
                   >
                     {indicator}
                     {formData.indicators.includes(indicator) && <X className="ml-1 h-3 w-3" />}
@@ -224,14 +241,16 @@ export function CreateAgentModal({ open, onOpenChange }: CreateAgentModalProps) 
                 value={formData.prompt}
                 onChange={(e) => setFormData({ ...formData, prompt: e.target.value })}
                 required
+                disabled={isCreatingAgent}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isCreatingAgent}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!formData.modelId || !formData.exchangeId}>
+            <Button type="submit" disabled={!formData.modelId || !formData.exchangeId || isCreatingAgent}>
+              {isCreatingAgent && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Create Agent
             </Button>
           </DialogFooter>

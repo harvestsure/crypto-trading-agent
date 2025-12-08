@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useAppStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
@@ -17,10 +16,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Loader2 } from "lucide-react"
 
 interface CreateExchangeModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onSuccess?: () => void // Added onSuccess callback for refetching
 }
 
 const exchanges = [
@@ -31,8 +32,9 @@ const exchanges = [
   { value: "gate", label: "Gate.io", needsPassphrase: false },
 ]
 
-export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalProps) {
-  const addExchange = useAppStore((state) => state.addExchange)
+export function CreateExchangeModal({ open, onOpenChange, onSuccess }: CreateExchangeModalProps) {
+  const { createExchange, isCreatingExchange } = useAppStore()
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     exchange: "binance" as const,
@@ -44,16 +46,26 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
 
   const selectedExchange = exchanges.find((e) => e.value === formData.exchange)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    addExchange({
-      id: crypto.randomUUID(),
-      ...formData,
-      createdAt: new Date(),
-      status: "connected",
+    setError(null)
+
+    const result = await createExchange({
+      name: formData.name,
+      exchange: formData.exchange,
+      apiKey: formData.apiKey,
+      secretKey: formData.secretKey,
+      passphrase: formData.passphrase || undefined,
+      testnet: formData.testnet,
     })
-    setFormData({ name: "", exchange: "binance", apiKey: "", secretKey: "", passphrase: "", testnet: true })
-    onOpenChange(false)
+
+    if (result.success) {
+      setFormData({ name: "", exchange: "binance", apiKey: "", secretKey: "", passphrase: "", testnet: true })
+      onOpenChange(false)
+      onSuccess?.()
+    } else {
+      setError(result.error || "Failed to create exchange")
+    }
   }
 
   return (
@@ -65,6 +77,8 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
+            {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
+
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
               <Input
@@ -73,6 +87,7 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
+                disabled={isCreatingExchange}
               />
             </div>
 
@@ -83,6 +98,7 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
                 onValueChange={(value: "binance" | "okx" | "bybit" | "bitget" | "gate") =>
                   setFormData({ ...formData, exchange: value })
                 }
+                disabled={isCreatingExchange}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -106,6 +122,7 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
                 value={formData.apiKey}
                 onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
                 required
+                disabled={isCreatingExchange}
               />
             </div>
 
@@ -118,6 +135,7 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
                 value={formData.secretKey}
                 onChange={(e) => setFormData({ ...formData, secretKey: e.target.value })}
                 required
+                disabled={isCreatingExchange}
               />
             </div>
 
@@ -131,6 +149,7 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
                   value={formData.passphrase}
                   onChange={(e) => setFormData({ ...formData, passphrase: e.target.value })}
                   required
+                  disabled={isCreatingExchange}
                 />
               </div>
             )}
@@ -146,14 +165,18 @@ export function CreateExchangeModal({ open, onOpenChange }: CreateExchangeModalP
                 id="testnet"
                 checked={formData.testnet}
                 onCheckedChange={(checked) => setFormData({ ...formData, testnet: checked })}
+                disabled={isCreatingExchange}
               />
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isCreatingExchange}>
               Cancel
             </Button>
-            <Button type="submit">Add Exchange</Button>
+            <Button type="submit" disabled={isCreatingExchange}>
+              {isCreatingExchange && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Add Exchange
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>

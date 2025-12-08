@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useExchanges } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
@@ -9,12 +10,28 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Plus, MoreVertical, Building2, Trash2, RefreshCw } from "lucide-react"
+import { Plus, MoreVertical, Building2, Trash2, RefreshCw, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function ExchangesPage() {
-  const { exchanges, deleteExchange, updateExchange } = useAppStore()
+  const { exchanges, isLoading, mutate } = useExchanges()
+  const { updateExchange, deleteExchange } = useAppStore()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+
+  const handleDelete = async (id: string) => {
+    const result = await deleteExchange(id)
+    if (result.success) {
+      mutate()
+    }
+  }
+
+  const handleReconnect = async (id: string) => {
+    const result = await updateExchange(id, { status: "connected" })
+    if (result.success) {
+      mutate()
+    }
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -25,9 +42,13 @@ export default function ExchangesPage() {
         <div className="p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">
-                {exchanges.length} exchange{exchanges.length !== 1 ? "s" : ""} connected
-              </p>
+              {isLoading ? (
+                <Skeleton className="h-5 w-32" />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {exchanges.length} exchange{exchanges.length !== 1 ? "s" : ""} connected
+                </p>
+              )}
             </div>
             <Button onClick={() => setIsCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -35,7 +56,14 @@ export default function ExchangesPage() {
             </Button>
           </div>
 
-          {exchanges.length === 0 ? (
+          {isLoading ? (
+            <div className="rounded-xl border border-border bg-card p-8">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <span className="text-muted-foreground">Loading exchanges...</span>
+              </div>
+            </div>
+          ) : exchanges.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card p-12 text-center">
               <Building2 className="h-12 w-12 text-muted-foreground" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">No exchanges connected</h3>
@@ -94,17 +122,11 @@ export default function ExchangesPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() =>
-                                updateExchange(exchange.id, {
-                                  status: "connected",
-                                })
-                              }
-                            >
+                            <DropdownMenuItem onClick={() => handleReconnect(exchange.id)}>
                               <RefreshCw className="mr-2 h-4 w-4" />
                               Reconnect
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive" onClick={() => deleteExchange(exchange.id)}>
+                            <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(exchange.id)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </DropdownMenuItem>
@@ -119,7 +141,7 @@ export default function ExchangesPage() {
           )}
         </div>
 
-        <CreateExchangeModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        <CreateExchangeModal open={isCreateOpen} onOpenChange={setIsCreateOpen} onSuccess={() => mutate()} />
       </main>
     </div>
   )

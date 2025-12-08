@@ -1,70 +1,170 @@
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
-import type { AIModel, Exchange, TradingAgent, Order } from "./types"
+import * as api from "@/lib/api"
 
 interface AppState {
-  models: AIModel[]
-  exchanges: Exchange[]
-  agents: TradingAgent[]
-  orders: Order[]
+  // Loading states
+  isCreatingModel: boolean
+  isCreatingExchange: boolean
+  isCreatingAgent: boolean
 
-  addModel: (model: AIModel) => void
-  updateModel: (id: string, model: Partial<AIModel>) => void
-  deleteModel: (id: string) => void
+  // API action wrappers that return success/error
+  createModel: (model: {
+    name: string
+    provider: string
+    apiKey: string
+    baseUrl?: string
+    model: string
+  }) => Promise<{ success: boolean; error?: string }>
 
-  addExchange: (exchange: Exchange) => void
-  updateExchange: (id: string, exchange: Partial<Exchange>) => void
-  deleteExchange: (id: string) => void
+  updateModel: (id: string, data: { status?: string }) => Promise<{ success: boolean; error?: string }>
 
-  addAgent: (agent: TradingAgent) => void
-  updateAgent: (id: string, agent: Partial<TradingAgent>) => void
-  deleteAgent: (id: string) => void
+  deleteModel: (id: string) => Promise<{ success: boolean; error?: string }>
 
-  addOrder: (order: Order) => void
+  createExchange: (exchange: {
+    name: string
+    exchange: string
+    apiKey: string
+    secretKey: string
+    passphrase?: string
+    testnet: boolean
+  }) => Promise<{ success: boolean; error?: string }>
+
+  updateExchange: (id: string, data: { status?: string }) => Promise<{ success: boolean; error?: string }>
+
+  deleteExchange: (id: string) => Promise<{ success: boolean; error?: string }>
+
+  createAgent: (agent: {
+    name: string
+    modelId: string
+    exchangeId: string
+    symbol: string
+    timeframe: string
+    indicators: string[]
+    prompt: string
+  }) => Promise<{ success: boolean; error?: string }>
+
+  updateAgent: (id: string, data: { status?: string }) => Promise<{ success: boolean; error?: string }>
+
+  deleteAgent: (id: string) => Promise<{ success: boolean; error?: string }>
+
+  startAgent: (id: string) => Promise<{ success: boolean; error?: string }>
+
+  stopAgent: (id: string) => Promise<{ success: boolean; error?: string }>
 }
 
-export const useAppStore = create<AppState>()(
-  persist(
-    (set) => ({
-      models: [],
-      exchanges: [],
-      agents: [],
-      orders: [],
+export const useAppStore = create<AppState>()((set) => ({
+  isCreatingModel: false,
+  isCreatingExchange: false,
+  isCreatingAgent: false,
 
-      addModel: (model) => set((state) => ({ models: [...state.models, model] })),
-      updateModel: (id, model) =>
-        set((state) => ({
-          models: state.models.map((m) => (m.id === id ? { ...m, ...model } : m)),
-        })),
-      deleteModel: (id) =>
-        set((state) => ({
-          models: state.models.filter((m) => m.id !== id),
-        })),
+  createModel: async (model) => {
+    set({ isCreatingModel: true })
+    try {
+      const result = await api.createModel({
+        id: crypto.randomUUID(),
+        name: model.name,
+        provider: model.provider,
+        api_key: model.apiKey,
+        base_url: model.baseUrl,
+        model: model.model,
+      })
+      set({ isCreatingModel: false })
+      if (result.error) return { success: false, error: result.error }
+      return { success: true }
+    } catch (e) {
+      set({ isCreatingModel: false })
+      return { success: false, error: e instanceof Error ? e.message : "Unknown error" }
+    }
+  },
 
-      addExchange: (exchange) => set((state) => ({ exchanges: [...state.exchanges, exchange] })),
-      updateExchange: (id, exchange) =>
-        set((state) => ({
-          exchanges: state.exchanges.map((e) => (e.id === id ? { ...e, ...exchange } : e)),
-        })),
-      deleteExchange: (id) =>
-        set((state) => ({
-          exchanges: state.exchanges.filter((e) => e.id !== id),
-        })),
+  updateModel: async (id, data) => {
+    const result = await api.updateModel(id, data)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
 
-      addAgent: (agent) => set((state) => ({ agents: [...state.agents, agent] })),
-      updateAgent: (id, agent) =>
-        set((state) => ({
-          agents: state.agents.map((a) => (a.id === id ? { ...a, ...agent } : a)),
-        })),
-      deleteAgent: (id) =>
-        set((state) => ({
-          agents: state.agents.filter((a) => a.id !== id),
-        })),
+  deleteModel: async (id) => {
+    const result = await api.deleteModel(id)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
 
-      addOrder: (order) => set((state) => ({ orders: [...state.orders, order] })),
-    }),
-    {
-      name: "crypto-agent-storage",
-    },
-  ),
-)
+  createExchange: async (exchange) => {
+    set({ isCreatingExchange: true })
+    try {
+      const result = await api.createExchange({
+        id: crypto.randomUUID(),
+        name: exchange.name,
+        exchange: exchange.exchange,
+        api_key: exchange.apiKey,
+        secret_key: exchange.secretKey,
+        passphrase: exchange.passphrase,
+        testnet: exchange.testnet,
+      })
+      set({ isCreatingExchange: false })
+      if (result.error) return { success: false, error: result.error }
+      return { success: true }
+    } catch (e) {
+      set({ isCreatingExchange: false })
+      return { success: false, error: e instanceof Error ? e.message : "Unknown error" }
+    }
+  },
+
+  updateExchange: async (id, data) => {
+    const result = await api.updateExchange(id, data)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
+
+  deleteExchange: async (id) => {
+    const result = await api.deleteExchange(id)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
+
+  createAgent: async (agent) => {
+    set({ isCreatingAgent: true })
+    try {
+      const result = await api.createAgent({
+        id: crypto.randomUUID(),
+        name: agent.name,
+        model_id: agent.modelId,
+        exchange_id: agent.exchangeId,
+        symbol: agent.symbol,
+        timeframe: agent.timeframe,
+        indicators: agent.indicators,
+        prompt: agent.prompt,
+      })
+      set({ isCreatingAgent: false })
+      if (result.error) return { success: false, error: result.error }
+      return { success: true }
+    } catch (e) {
+      set({ isCreatingAgent: false })
+      return { success: false, error: e instanceof Error ? e.message : "Unknown error" }
+    }
+  },
+
+  updateAgent: async (id, data) => {
+    const result = await api.updateAgent(id, data)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
+
+  deleteAgent: async (id) => {
+    const result = await api.deleteAgent(id)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
+
+  startAgent: async (id) => {
+    const result = await api.startAgent(id)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
+
+  stopAgent: async (id) => {
+    const result = await api.stopAgent(id)
+    if (result.error) return { success: false, error: result.error }
+    return { success: true }
+  },
+}))

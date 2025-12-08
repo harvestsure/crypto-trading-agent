@@ -45,7 +45,33 @@ export async function checkHealth() {
 
 // ============== AI Models ==============
 
-export async function registerModel(model: {
+export async function getModels() {
+  return fetchApi<{
+    models: Array<{
+      id: string
+      name: string
+      provider: string
+      model: string
+      base_url?: string
+      status: string
+      created_at: string
+    }>
+  }>("/api/models")
+}
+
+export async function getModel(modelId: string) {
+  return fetchApi<{
+    id: string
+    name: string
+    provider: string
+    model: string
+    base_url?: string
+    status: string
+    created_at: string
+  }>(`/api/models/${modelId}`)
+}
+
+export async function createModel(model: {
   id: string
   name: string
   provider: string
@@ -59,6 +85,13 @@ export async function registerModel(model: {
   })
 }
 
+export async function updateModel(modelId: string, data: { status?: string }) {
+  return fetchApi<{ status: string }>(`/api/models/${modelId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
+}
+
 export async function deleteModel(modelId: string) {
   return fetchApi<{ status: string }>(`/api/models/${modelId}`, {
     method: "DELETE",
@@ -66,6 +99,30 @@ export async function deleteModel(modelId: string) {
 }
 
 // ============== Exchanges ==============
+
+export async function getExchanges() {
+  return fetchApi<{
+    exchanges: Array<{
+      id: string
+      name: string
+      exchange: string
+      testnet: boolean
+      status: string
+      created_at: string
+    }>
+  }>("/api/exchanges")
+}
+
+export async function getExchange(exchangeId: string) {
+  return fetchApi<{
+    id: string
+    name: string
+    exchange: string
+    testnet: boolean
+    status: string
+    created_at: string
+  }>(`/api/exchanges/${exchangeId}`)
+}
 
 export async function connectExchange(exchange: {
   id: string
@@ -82,6 +139,13 @@ export async function connectExchange(exchange: {
   })
 }
 
+export async function updateExchange(exchangeId: string, data: { status?: string }) {
+  return fetchApi<{ status: string }>(`/api/exchanges/${exchangeId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
+}
+
 export async function disconnectExchange(exchangeId: string) {
   return fetchApi<{ status: string }>(`/api/exchanges/${exchangeId}`, {
     method: "DELETE",
@@ -89,6 +153,54 @@ export async function disconnectExchange(exchangeId: string) {
 }
 
 // ============== Agents ==============
+
+export async function getAgents() {
+  return fetchApi<{
+    agents: Array<{
+      id: string
+      name: string
+      model_id: string
+      exchange_id: string
+      symbol: string
+      timeframe: string
+      indicators: string[]
+      prompt: string
+      status: string
+      max_position_size?: number
+      risk_per_trade?: number
+      default_leverage?: number
+      created_at: string
+      performance?: {
+        total_trades: number
+        win_rate: number
+        pnl: number
+      }
+    }>
+  }>("/api/agents")
+}
+
+export async function getAgent(agentId: string) {
+  return fetchApi<{
+    id: string
+    name: string
+    model_id: string
+    exchange_id: string
+    symbol: string
+    timeframe: string
+    indicators: string[]
+    prompt: string
+    status: string
+    max_position_size?: number
+    risk_per_trade?: number
+    default_leverage?: number
+    created_at: string
+    performance?: {
+      total_trades: number
+      win_rate: number
+      pnl: number
+    }
+  }>(`/api/agents/${agentId}`)
+}
 
 export async function createAgent(agent: {
   id: string
@@ -109,28 +221,11 @@ export async function createAgent(agent: {
   })
 }
 
-export async function getAgents() {
-  return fetchApi<{ agents: Array<{ agent_id: string; is_running: boolean; symbol: string }> }>("/api/agents")
-}
-
-export async function getAgentStatus(agentId: string) {
-  return fetchApi<{
-    agent_id: string
-    is_running: boolean
-    symbol: string
-    timeframe: string
-    max_position_size: number
-    last_analysis: unknown
-  }>(`/api/agents/${agentId}`)
-}
-
-export async function startAgent(agentId: string, interval?: number) {
-  const url = interval ? `/api/agents/${agentId}/start?interval=${interval}` : `/api/agents/${agentId}/start`
-  return fetchApi<{ status: string }>(url, { method: "POST" })
-}
-
-export async function stopAgent(agentId: string) {
-  return fetchApi<{ status: string }>(`/api/agents/${agentId}/stop`, { method: "POST" })
+export async function updateAgent(agentId: string, data: { status?: string }) {
+  return fetchApi<{ status: string }>(`/api/agents/${agentId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  })
 }
 
 export async function deleteAgent(agentId: string) {

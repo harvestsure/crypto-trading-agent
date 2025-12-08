@@ -2,29 +2,56 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { useAgents, useModels, useExchanges } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { CreateAgentModal } from "@/components/modals/create-agent-modal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Plus, Bot, AlertCircle, Play, Pause, MoreVertical, ExternalLink, TrendingUp, TrendingDown } from "lucide-react"
+import {
+  Plus,
+  Bot,
+  AlertCircle,
+  Play,
+  Pause,
+  MoreVertical,
+  ExternalLink,
+  TrendingUp,
+  TrendingDown,
+  Loader2,
+} from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function AgentsPage() {
-  const { agents, models, exchanges, updateAgent, deleteAgent } = useAppStore()
+  const { agents, isLoading: agentsLoading, mutate } = useAgents()
+  const { models, isLoading: modelsLoading } = useModels()
+  const { exchanges, isLoading: exchangesLoading } = useExchanges()
+  const { startAgent, stopAgent, deleteAgent } = useAppStore()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
 
+  const isLoading = agentsLoading || modelsLoading || exchangesLoading
   const canCreateAgent = models.length > 0 && exchanges.length > 0
 
-  const handleToggleAgent = (agentId: string) => {
+  const handleToggleAgent = async (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
     if (agent) {
-      updateAgent(agentId, {
-        status: agent.status === "running" ? "paused" : "running",
-      })
+      if (agent.status === "running") {
+        await stopAgent(agentId)
+      } else {
+        await startAgent(agentId)
+      }
+      mutate()
+    }
+  }
+
+  const handleDeleteAgent = async (agentId: string) => {
+    const result = await deleteAgent(agentId)
+    if (result.success) {
+      mutate()
     }
   }
 
@@ -35,7 +62,7 @@ export default function AgentsPage() {
         <Header title="Trading Agents" description="Create and manage your AI trading agents" />
 
         <div className="p-6">
-          {!canCreateAgent && (
+          {!isLoading && !canCreateAgent && (
             <Alert className="mb-6 border-warning/50 bg-warning/10">
               <AlertCircle className="h-4 w-4 text-warning" />
               <AlertTitle className="text-warning">Setup Required</AlertTitle>
@@ -47,17 +74,28 @@ export default function AgentsPage() {
 
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">
-                {agents.length} agent{agents.length !== 1 ? "s" : ""} configured
-              </p>
+              {isLoading ? (
+                <Skeleton className="h-5 w-32" />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {agents.length} agent{agents.length !== 1 ? "s" : ""} configured
+                </p>
+              )}
             </div>
-            <Button onClick={() => setIsCreateOpen(true)} disabled={!canCreateAgent}>
+            <Button onClick={() => setIsCreateOpen(true)} disabled={!canCreateAgent || isLoading}>
               <Plus className="mr-2 h-4 w-4" />
               Create Agent
             </Button>
           </div>
 
-          {agents.length === 0 ? (
+          {isLoading ? (
+            <div className="rounded-xl border border-border bg-card p-8">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <span className="text-muted-foreground">Loading agents...</span>
+              </div>
+            </div>
+          ) : agents.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card p-12 text-center">
               <Bot className="h-12 w-12 text-muted-foreground" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">No agents created</h3>
@@ -130,7 +168,7 @@ export default function AgentsPage() {
                               </>
                             )}
                           </DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive" onClick={() => deleteAgent(agent.id)}>
+                          <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteAgent(agent.id)}>
                             Delete Agent
                           </DropdownMenuItem>
                         </DropdownMenuContent>
@@ -203,7 +241,7 @@ export default function AgentsPage() {
           )}
         </div>
 
-        <CreateAgentModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        <CreateAgentModal open={isCreateOpen} onOpenChange={setIsCreateOpen} onSuccess={() => mutate()} />
       </main>
     </div>
   )

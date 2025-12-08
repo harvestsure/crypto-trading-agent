@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { useModels } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
@@ -9,11 +10,28 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Plus, MoreVertical, Brain, Trash2, Edit } from "lucide-react"
+import { Plus, MoreVertical, Brain, Trash2, Edit, Loader2 } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function ModelsPage() {
-  const { models, deleteModel, updateModel } = useAppStore()
+  const { models, isLoading, mutate } = useModels()
+  const { updateModel, deleteModel } = useAppStore()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+
+  const handleDelete = async (id: string) => {
+    const result = await deleteModel(id)
+    if (result.success) {
+      mutate() // Refresh data
+    }
+  }
+
+  const handleToggleStatus = async (id: string, currentStatus: string) => {
+    const newStatus = currentStatus === "active" ? "inactive" : "active"
+    const result = await updateModel(id, { status: newStatus })
+    if (result.success) {
+      mutate()
+    }
+  }
 
   return (
     <div className="flex min-h-screen">
@@ -24,9 +42,13 @@ export default function ModelsPage() {
         <div className="p-6">
           <div className="mb-6 flex items-center justify-between">
             <div>
-              <p className="text-sm text-muted-foreground">
-                {models.length} model{models.length !== 1 ? "s" : ""} configured
-              </p>
+              {isLoading ? (
+                <Skeleton className="h-5 w-32" />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {models.length} model{models.length !== 1 ? "s" : ""} configured
+                </p>
+              )}
             </div>
             <Button onClick={() => setIsCreateOpen(true)}>
               <Plus className="mr-2 h-4 w-4" />
@@ -34,7 +56,14 @@ export default function ModelsPage() {
             </Button>
           </div>
 
-          {models.length === 0 ? (
+          {isLoading ? (
+            <div className="rounded-xl border border-border bg-card p-8">
+              <div className="flex items-center justify-center gap-2">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <span className="text-muted-foreground">Loading models...</span>
+              </div>
+            </div>
+          ) : models.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border bg-card p-12 text-center">
               <Brain className="h-12 w-12 text-muted-foreground" />
               <h3 className="mt-4 text-lg font-semibold text-foreground">No models configured</h3>
@@ -81,17 +110,11 @@ export default function ModelsPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() =>
-                                updateModel(model.id, {
-                                  status: model.status === "active" ? "inactive" : "active",
-                                })
-                              }
-                            >
+                            <DropdownMenuItem onClick={() => handleToggleStatus(model.id, model.status)}>
                               <Edit className="mr-2 h-4 w-4" />
                               {model.status === "active" ? "Deactivate" : "Activate"}
                             </DropdownMenuItem>
-                            <DropdownMenuItem className="text-destructive" onClick={() => deleteModel(model.id)}>
+                            <DropdownMenuItem className="text-destructive" onClick={() => handleDelete(model.id)}>
                               <Trash2 className="mr-2 h-4 w-4" />
                               Delete
                             </DropdownMenuItem>
@@ -106,7 +129,7 @@ export default function ModelsPage() {
           )}
         </div>
 
-        <CreateModelModal open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        <CreateModelModal open={isCreateOpen} onOpenChange={setIsCreateOpen} onSuccess={() => mutate()} />
       </main>
     </div>
   )

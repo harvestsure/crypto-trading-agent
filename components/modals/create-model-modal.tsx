@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useAppStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
@@ -16,10 +15,12 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Loader2 } from "lucide-react"
 
 interface CreateModelModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onSuccess?: () => void // Added onSuccess callback for refetching
 }
 
 const providers = [
@@ -29,8 +30,9 @@ const providers = [
   { value: "custom", label: "Custom", models: [] },
 ]
 
-export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) {
-  const addModel = useAppStore((state) => state.addModel)
+export function CreateModelModal({ open, onOpenChange, onSuccess }: CreateModelModalProps) {
+  const { createModel, isCreatingModel } = useAppStore()
+  const [error, setError] = useState<string | null>(null)
   const [formData, setFormData] = useState({
     name: "",
     provider: "openai" as const,
@@ -41,16 +43,25 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
 
   const selectedProvider = providers.find((p) => p.value === formData.provider)
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    addModel({
-      id: crypto.randomUUID(),
-      ...formData,
-      createdAt: new Date(),
-      status: "active",
+    setError(null)
+
+    const result = await createModel({
+      name: formData.name,
+      provider: formData.provider,
+      apiKey: formData.apiKey,
+      baseUrl: formData.baseUrl || undefined,
+      model: formData.model,
     })
-    setFormData({ name: "", provider: "openai", apiKey: "", baseUrl: "", model: "gpt-4o" })
-    onOpenChange(false)
+
+    if (result.success) {
+      setFormData({ name: "", provider: "openai", apiKey: "", baseUrl: "", model: "gpt-4o" })
+      onOpenChange(false)
+      onSuccess?.()
+    } else {
+      setError(result.error || "Failed to create model")
+    }
   }
 
   return (
@@ -62,6 +73,8 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
+            {error && <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>}
+
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
               <Input
@@ -70,6 +83,7 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                 required
+                disabled={isCreatingModel}
               />
             </div>
 
@@ -84,6 +98,7 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
                     model: providers.find((p) => p.value === value)?.models[0] || "",
                   })
                 }
+                disabled={isCreatingModel}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -107,9 +122,14 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
                   value={formData.model}
                   onChange={(e) => setFormData({ ...formData, model: e.target.value })}
                   required
+                  disabled={isCreatingModel}
                 />
               ) : (
-                <Select value={formData.model} onValueChange={(value) => setFormData({ ...formData, model: value })}>
+                <Select
+                  value={formData.model}
+                  onValueChange={(value) => setFormData({ ...formData, model: value })}
+                  disabled={isCreatingModel}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -133,6 +153,7 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
                 value={formData.apiKey}
                 onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
                 required
+                disabled={isCreatingModel}
               />
             </div>
 
@@ -144,15 +165,19 @@ export function CreateModelModal({ open, onOpenChange }: CreateModelModalProps) 
                   placeholder="https://api.example.com/v1"
                   value={formData.baseUrl}
                   onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+                  disabled={isCreatingModel}
                 />
               </div>
             )}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isCreatingModel}>
               Cancel
             </Button>
-            <Button type="submit">Create Model</Button>
+            <Button type="submit" disabled={isCreatingModel}>
+              {isCreatingModel && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create Model
+            </Button>
           </DialogFooter>
         </form>
       </DialogContent>
