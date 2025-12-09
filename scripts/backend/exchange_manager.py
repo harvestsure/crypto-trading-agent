@@ -158,7 +158,7 @@ class ExchangeManager:
             exchange.options['defaultType'] = 'swap'
 
             if config.get('testnet'):
-                if hasattr(exchange, 'enable_demo_trading'):
+                if hasattr(exchange, 'enable_demo_trading') and exchange_type == 'binance':
                     exchange.enable_demo_trading(True)
                 else:
                     exchange.set_sandbox_mode(True)

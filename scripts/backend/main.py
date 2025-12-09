@@ -272,17 +272,23 @@ async def lifespan(app: FastAPI):
         enabled_exchanges = ExchangeRepository.get_all()
         if enabled_exchanges:
             logging.info(f"从数据库加载 {len(enabled_exchanges)} 个交易所配置")
-            await exchange_manager.initialize_all([
-                {
+            for ex in enabled_exchanges:
+                success = await exchange_manager.add_exchange({
                     'id': ex['id'],
                     'exchange': ex['exchange'],
                     'api_key': ex['api_key'],
                     'secret_key': ex['secret_key'],
                     'passphrase': ex.get('passphrase'),
                     'testnet': ex.get('testnet', True)
-                }
-                for ex in enabled_exchanges
-            ])
+                })
+                
+                # 更新数据库中的状态
+                if success:
+                    ExchangeRepository.update(ex['id'], {'status': 'connected'})
+                    logging.info(f"✅ 启动时连接交易所: {ex['name']}")
+                else:
+                    ExchangeRepository.update(ex['id'], {'status': 'error'})
+                    logging.warning(f"❌ 启动时连接交易所失败: {ex['name']}")
     except Exception as e:
         logger.error(f"初始化交易所失败: {e}")
     
