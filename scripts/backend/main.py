@@ -31,6 +31,7 @@ from database import (
     BalanceHistoryRepository,
     ActivityLogRepository
 )
+from exchange_manager import ExchangeManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -113,144 +114,6 @@ class ConnectionManager:
     async def send_to_client(self, client_id: str, message: dict):
         if client_id in self.active_connections:
             await self.active_connections[client_id].send_json(message)
-
-
-class ExchangeManager:
-    """Manages exchange connections using ccxt.pro"""
-    
-    def __init__(self):
-        self.exchanges: Dict[str, Any] = {}
-        self.kline_tasks: Dict[str, asyncio.Task] = {}
-    
-    async def connect_exchange(self, config: dict) -> bool:
-        """Connect to an exchange"""
-        try:
-            import ccxt.pro as ccxtpro
-            
-            exchange_name = config['exchange']
-            exchange_class = getattr(ccxtpro, exchange_name, None)
-            if not exchange_class:
-                logger.error(f"Exchange {exchange_name} not supported")
-                return False
-            
-            exchange_config = {
-                'apiKey': config['api_key'],
-                'secret': config['secret_key'],
-                'enableRateLimit': True,
-            }
-            
-            if config.get('passphrase'):
-                exchange_config['password'] = config['passphrase']
-            
-            if config.get('testnet'):
-                exchange_config['sandbox'] = True
-            
-            exchange = exchange_class(exchange_config)
-            self.exchanges[config['id']] = exchange
-            
-            await exchange.load_markets()
-            
-            # Update exchange status in database
-            ExchangeRepository.update(config['id'], {'status': 'connected'})
-            ActivityLogRepository.log('info', f"Connected to {exchange_name}", details={'exchange_id': config['id']})
-            
-            logger.info(f"Connected to {exchange_name}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to connect to exchange: {e}")
-            ExchangeRepository.update(config['id'], {'status': 'error'})
-            ActivityLogRepository.log('error', f"Failed to connect to exchange: {e}", details={'exchange_id': config['id']})
-            return False
-    
-    async def disconnect_exchange(self, exchange_id: str):
-        """Disconnect from an exchange"""
-        if exchange_id in self.exchanges:
-            try:
-                await self.exchanges[exchange_id].close()
-            except:
-                pass
-            del self.exchanges[exchange_id]
-            ExchangeRepository.update(exchange_id, {'status': 'disconnected'})
-            logger.info(f"Disconnected from exchange {exchange_id}")
-    
-    async def get_ticker(self, exchange_id: str, symbol: str) -> Optional[dict]:
-        """Get current ticker data"""
-        if exchange_id not in self.exchanges:
-            return None
-        try:
-            ticker = await self.exchanges[exchange_id].fetch_ticker(symbol)
-            return ticker
-        except Exception as e:
-            logger.error(f"Error fetching ticker: {e}")
-            return None
-    
-    async def get_balance(self, exchange_id: str) -> Optional[dict]:
-        """Get account balance"""
-        if exchange_id not in self.exchanges:
-            return None
-        try:
-            balance = await self.exchanges[exchange_id].fetch_balance()
-            return balance
-        except Exception as e:
-            logger.error(f"Error fetching balance: {e}")
-            return None
-    
-    async def get_positions(self, exchange_id: str, symbol: Optional[str] = None) -> List[dict]:
-        """Get open positions"""
-        if exchange_id not in self.exchanges:
-            return []
-        try:
-            exchange = self.exchanges[exchange_id]
-            if hasattr(exchange, 'fetch_positions'):
-                positions = await exchange.fetch_positions([symbol] if symbol else None)
-                return [p for p in positions if float(p.get('contracts', 0)) != 0]
-            return []
-        except Exception as e:
-            logger.error(f"Error fetching positions: {e}")
-            return []
-    
-    async def get_klines(self, exchange_id: str, symbol: str, timeframe: str, limit: int = 100) -> List:
-        """Get OHLCV data"""
-        if exchange_id not in self.exchanges:
-            return []
-        try:
-            ohlcv = await self.exchanges[exchange_id].fetch_ohlcv(symbol, timeframe, limit=limit)
-            return ohlcv
-        except Exception as e:
-            logger.error(f"Error fetching klines: {e}")
-            return []
-    
-    async def create_order(self, exchange_id: str, symbol: str, order_type: str, 
-                          side: str, amount: float, price: Optional[float] = None) -> Optional[dict]:
-        """Create an order"""
-        if exchange_id not in self.exchanges:
-            return None
-        try:
-            exchange = self.exchanges[exchange_id]
-            if order_type == 'market':
-                order = await exchange.create_market_order(symbol, side, amount)
-            else:
-                order = await exchange.create_limit_order(symbol, side, amount, price)
-            
-            ActivityLogRepository.log('info', f"Order created: {side} {amount} {symbol}", 
-                                     details={'order': order})
-            return order
-        except Exception as e:
-            logger.error(f"Error creating order: {e}")
-            ActivityLogRepository.log('error', f"Order failed: {e}")
-            return None
-    
-    async def cancel_order(self, exchange_id: str, order_id: str, symbol: str) -> bool:
-        """Cancel an order"""
-        if exchange_id not in self.exchanges:
-            return False
-        try:
-            await self.exchanges[exchange_id].cancel_order(order_id, symbol)
-            return True
-        except Exception as e:
-            logger.error(f"Error canceling order: {e}")
-            return False
 
 
 class IndicatorCalculator:
@@ -403,13 +266,35 @@ running_agents: Dict[str, asyncio.Task] = {}
 async def lifespan(app: FastAPI):
     init_database()
     logger.info("Database initialized")
+    
+    # 从数据库加载所有启用的交易所
+    try:
+        enabled_exchanges = ExchangeRepository.get_all()
+        if enabled_exchanges:
+            logging.info(f"从数据库加载 {len(enabled_exchanges)} 个交易所配置")
+            await exchange_manager.initialize_all([
+                {
+                    'id': ex['id'],
+                    'exchange': ex['exchange'],
+                    'api_key': ex['api_key'],
+                    'secret_key': ex['secret_key'],
+                    'passphrase': ex.get('passphrase'),
+                    'testnet': ex.get('testnet', True)
+                }
+                for ex in enabled_exchanges
+            ])
+    except Exception as e:
+        logger.error(f"初始化交易所失败: {e}")
+    
     ActivityLogRepository.log('info', 'Backend server started')
+    
     yield
+    
     # Cleanup
     for agent_id, task in running_agents.items():
         task.cancel()
-    for exchange_id in list(exchange_manager.exchanges.keys()):
-        await exchange_manager.disconnect_exchange(exchange_id)
+    
+    await exchange_manager.close_all()
     ActivityLogRepository.log('info', 'Backend server stopped')
 
 
@@ -497,9 +382,31 @@ async def get_exchanges():
     return exchanges
 
 
+@app.get("/api/exchanges/{exchange_id}/status")
+async def get_exchange_status(exchange_id: str):
+    """获取交易所连接状态"""
+    config = ExchangeRepository.get_by_id(exchange_id)
+    if not config:
+        raise HTTPException(status_code=404, detail="Exchange not found")
+    
+    exchange = exchange_manager.get_exchange(exchange_id)
+    is_connected = exchange is not None
+    
+    return {
+        'id': exchange_id,
+        'name': config['name'],
+        'exchange': config['exchange'],
+        'connected': is_connected,
+        'status': config.get('status', 'disconnected'),
+        'testnet': config.get('testnet', False)
+    }
+
+
 @app.post("/api/exchanges")
 async def create_exchange(config: ExchangeConfig):
     exchange_id = config.id or f"ex_{uuid.uuid4().hex[:8]}"
+    
+    # 保存到数据库
     exchange_data = {
         'id': exchange_id,
         'name': config.name,
@@ -511,34 +418,134 @@ async def create_exchange(config: ExchangeConfig):
         'status': 'disconnected'
     }
     result = ExchangeRepository.create(exchange_data)
-    ActivityLogRepository.log('info', f"Created exchange: {config.name}", details={'exchange_id': exchange_id})
+    
+    # 动态添加到 ExchangeManager
+    try:
+        success = await exchange_manager.add_exchange({
+            'id': exchange_id,
+            'exchange': config.exchange,
+            'api_key': config.api_key,
+            'secret_key': config.secret_key,
+            'passphrase': config.passphrase,
+            'testnet': config.testnet
+        })
+        
+        if success:
+            ExchangeRepository.update(exchange_id, {'status': 'connected'})
+            ActivityLogRepository.log('info', f"Created and connected exchange: {config.name}", 
+                                     details={'exchange_id': exchange_id})
+        else:
+            ExchangeRepository.update(exchange_id, {'status': 'error'})
+            ActivityLogRepository.log('warning', f"Created exchange but connection failed: {config.name}", 
+                                     details={'exchange_id': exchange_id})
+    except Exception as e:
+        logger.error(f"Failed to add exchange: {e}")
+        ExchangeRepository.update(exchange_id, {'status': 'error'})
+        ActivityLogRepository.log('error', f"Failed to connect exchange: {e}", 
+                                 details={'exchange_id': exchange_id})
+    
+    return result
+
+
+@app.put("/api/exchanges/{exchange_id}")
+async def update_exchange(exchange_id: str, config: ExchangeConfig):
+    """更新交易所配置"""
+    existing = ExchangeRepository.get_by_id(exchange_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Exchange not found")
+    
+    # 更新数据库
+    update_data = {
+        'name': config.name,
+        'exchange': config.exchange,
+        'api_key': config.api_key,
+        'secret_key': config.secret_key,
+        'passphrase': config.passphrase,
+        'testnet': config.testnet,
+        'status': 'disconnected'
+    }
+    result = ExchangeRepository.update(exchange_id, update_data)
+    
+    # 更新 ExchangeManager
+    try:
+        success = await exchange_manager.update_exchange(exchange_id, {
+            'id': exchange_id,
+            'exchange': config.exchange,
+            'api_key': config.api_key,
+            'secret_key': config.secret_key,
+            'passphrase': config.passphrase,
+            'testnet': config.testnet
+        })
+        
+        if success:
+            ExchangeRepository.update(exchange_id, {'status': 'connected'})
+            ActivityLogRepository.log('info', f"Updated exchange: {config.name}", 
+                                     details={'exchange_id': exchange_id})
+        else:
+            ExchangeRepository.update(exchange_id, {'status': 'error'})
+            ActivityLogRepository.log('warning', f"Updated exchange but connection failed: {config.name}", 
+                                     details={'exchange_id': exchange_id})
+    except Exception as e:
+        logger.error(f"Failed to update exchange: {e}")
+        ExchangeRepository.update(exchange_id, {'status': 'error'})
+        ActivityLogRepository.log('error', f"Failed to update exchange connection: {e}", 
+                                 details={'exchange_id': exchange_id})
+    
     return result
 
 
 @app.post("/api/exchanges/{exchange_id}/connect")
 async def connect_exchange(exchange_id: str):
+    """连接交易所"""
     config = ExchangeRepository.get_by_id(exchange_id)
     if not config:
         raise HTTPException(status_code=404, detail="Exchange not found")
     
-    success = await exchange_manager.connect_exchange(config)
-    if success:
-        return {"success": True, "status": "connected"}
-    raise HTTPException(status_code=500, detail="Failed to connect to exchange")
+    try:
+        success = await exchange_manager.add_exchange({
+            'id': exchange_id,
+            'exchange': config['exchange'],
+            'api_key': config['api_key'],
+            'secret_key': config['secret_key'],
+            'passphrase': config.get('passphrase'),
+            'testnet': config.get('testnet', True)
+        })
+        
+        if success:
+            ExchangeRepository.update(exchange_id, {'status': 'connected'})
+            ActivityLogRepository.log('info', f"Connected to exchange", details={'exchange_id': exchange_id})
+            return {"success": True, "status": "connected"}
+        else:
+            ExchangeRepository.update(exchange_id, {'status': 'error'})
+            raise HTTPException(status_code=500, detail="Failed to connect to exchange")
+    except Exception as e:
+        logger.error(f"Failed to connect exchange: {e}")
+        ExchangeRepository.update(exchange_id, {'status': 'error'})
+        raise HTTPException(status_code=500, detail=f"Connection failed: {str(e)}")
 
 
 @app.post("/api/exchanges/{exchange_id}/disconnect")
 async def disconnect_exchange(exchange_id: str):
-    await exchange_manager.disconnect_exchange(exchange_id)
-    return {"success": True, "status": "disconnected"}
+    """断开交易所连接"""
+    success = await exchange_manager.remove_exchange(exchange_id)
+    
+    if success:
+        ExchangeRepository.update(exchange_id, {'status': 'disconnected'})
+        ActivityLogRepository.log('info', f"Disconnected from exchange", details={'exchange_id': exchange_id})
+        return {"success": True, "status": "disconnected"}
+    
+    raise HTTPException(status_code=500, detail="Failed to disconnect")
 
 
 @app.delete("/api/exchanges/{exchange_id}")
 async def delete_exchange(exchange_id: str):
-    await exchange_manager.disconnect_exchange(exchange_id)
+    """删除交易所"""
+    await exchange_manager.remove_exchange(exchange_id)
+    
     if ExchangeRepository.delete(exchange_id):
         ActivityLogRepository.log('info', f"Deleted exchange", details={'exchange_id': exchange_id})
         return {"success": True}
+    
     raise HTTPException(status_code=404, detail="Exchange not found")
 
 
@@ -630,48 +637,104 @@ async def get_agent_positions(agent_id: str):
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    # Try to get live positions from exchange
-    if agent['exchange_id'] in exchange_manager.exchanges:
-        live_positions = await exchange_manager.get_positions(agent['exchange_id'], agent['symbol'])
-        if live_positions:
-            return live_positions
+    # 尝试从交易所获取实时持仓
+    exchange = exchange_manager.get_exchange(agent['exchange_id'])
+    if exchange:
+        try:
+            if hasattr(exchange, 'fetch_positions'):
+                live_positions = await exchange.fetch_positions([agent['symbol']])
+                if live_positions:
+                    return [p for p in live_positions if float(p.get('contracts', 0)) != 0]
+        except Exception as e:
+            logger.error(f"Error fetching live positions: {e}")
     
-    # Fall back to database positions
+    # 降级到数据库持仓
     return PositionRepository.get_open_by_agent(agent_id)
 
 
 @app.get("/api/agents/{agent_id}/balance")
 async def get_agent_balance(agent_id: str):
-    agent = AgentRepository.get_by_id(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+    """
+    获取指定 Agent 的账户余额信息
     
-    if agent['exchange_id'] in exchange_manager.exchanges:
-        balance = await exchange_manager.get_balance(agent['exchange_id'])
-        if balance:
-            total = balance.get('total', {})
-            free = balance.get('free', {})
-            usdt_total = total.get('USDT', 0)
-            usdt_free = free.get('USDT', 0)
-            
-            balance_data = {
-                'total_balance': usdt_total,
-                'available_balance': usdt_free,
-                'unrealized_pnl': 0,
-                'realized_pnl': 0
-            }
-            
-            # Record balance history
+    Returns:
+        {
+            'total_balance': float,          # 账户总余额
+            'available_balance': float,      # 可用余额
+            'unrealized_pnl': float,         # 未实现盈亏
+            'realized_pnl': float,           # 已实现盈亏
+            'timestamp': str                 # ISO格式时间戳
+        }
+    """
+    try:
+        # 验证 Agent 存在
+        agent = AgentRepository.get_by_id(agent_id)
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
+        
+        # 获取交易所实例
+        exchange = exchange_manager.get_exchange(agent['exchange_id'])
+        if not exchange:
+            logger.warning(f"Exchange {agent['exchange_id']} not connected for agent {agent_id}")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Exchange {agent['exchange_id']} is not connected"
+            )
+        
+        # 从交易所获取余额数据
+        try:
+            balance = await exchange.fetch_balance()
+        except Exception as e:
+            logger.error(f"Failed to fetch balance from exchange {agent['exchange_id']}: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Failed to fetch balance from exchange: {str(e)}"
+            )
+        
+        if not balance:
+            logger.warning(f"Empty balance response from exchange {agent['exchange_id']}")
+            raise HTTPException(status_code=502, detail="Exchange returned empty balance")
+        
+        # 解析余额数据（支持多种币种和交易所格式）
+        total = balance.get('total', {})
+        free = balance.get('free', {})
+        
+        # 优先使用 USDT，如果没有则尝试其他币种
+        usdt_total = total.get('USDT', 0)
+        usdt_free = free.get('USDT', 0)
+        
+        # 如果 USDT 为 0，尝试其他常见的稳定币
+        if not usdt_total and not usdt_free:
+            for currency in ['USDC', 'BUSD', 'DAI', 'FDUSD']:
+                if currency in total or currency in free:
+                    usdt_total = total.get(currency, 0)
+                    usdt_free = free.get(currency, 0)
+                    break
+        
+        # 构建响应数据
+        balance_data = {
+            'total_balance': round(float(usdt_total), 8),
+            'available_balance': round(float(usdt_free), 8),
+            'unrealized_pnl': 0.0,  # 从 Position 表获取
+            'realized_pnl': 0.0,    # 从 Order 表获取
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # 记录余额历史（异步，不阻塞响应）
+        try:
             BalanceHistoryRepository.record(agent_id, agent['exchange_id'], balance_data)
-            
-            return balance_data
-    
-    return {
-        'total_balance': 0,
-        'available_balance': 0,
-        'unrealized_pnl': 0,
-        'realized_pnl': 0
-    }
+            logger.debug(f"Recorded balance history for agent {agent_id}")
+        except Exception as e:
+            logger.error(f"Failed to record balance history: {e}")
+        
+        logger.info(f"Successfully fetched balance for agent {agent_id}: {balance_data}")
+        return balance_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in get_agent_balance: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.get("/api/agents/{agent_id}/orders")
@@ -708,23 +771,45 @@ async def get_agent_logs(agent_id: str, limit: int = 100):
 
 @app.get("/api/market/ticker/{exchange_id}/{symbol}")
 async def get_ticker(exchange_id: str, symbol: str):
-    ticker = await exchange_manager.get_ticker(exchange_id, symbol)
-    if ticker:
+    exchange = exchange_manager.get_exchange(exchange_id)
+    if not exchange:
+        raise HTTPException(status_code=404, detail="Exchange not connected")
+    
+    try:
+        ticker = await exchange.fetch_ticker(symbol)
         return ticker
-    raise HTTPException(status_code=404, detail="Ticker not available")
+    except Exception as e:
+        logger.error(f"Error fetching ticker: {e}")
+        raise HTTPException(status_code=404, detail="Ticker not available")
 
 
 @app.get("/api/market/klines/{exchange_id}/{symbol}/{timeframe}")
 async def get_klines(exchange_id: str, symbol: str, timeframe: str, limit: int = 100):
-    klines = await exchange_manager.get_klines(exchange_id, symbol, timeframe, limit)
-    return klines
+    exchange = exchange_manager.get_exchange(exchange_id)
+    if not exchange:
+        raise HTTPException(status_code=404, detail="Exchange not connected")
+    
+    try:
+        klines = await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        return klines
+    except Exception as e:
+        logger.error(f"Error fetching klines: {e}")
+        return []
 
 
 @app.get("/api/market/indicators/{exchange_id}/{symbol}/{timeframe}")
 async def get_indicators(exchange_id: str, symbol: str, timeframe: str):
-    klines = await exchange_manager.get_klines(exchange_id, symbol, timeframe, 100)
-    if klines:
-        return IndicatorCalculator.calculate_all(klines)
+    exchange = exchange_manager.get_exchange(exchange_id)
+    if not exchange:
+        raise HTTPException(status_code=404, detail="Exchange not connected")
+    
+    try:
+        klines = await exchange.fetch_ohlcv(symbol, timeframe, 100)
+        if klines:
+            return IndicatorCalculator.calculate_all(klines)
+    except Exception as e:
+        logger.error(f"Error fetching indicators: {e}")
+    
     return {}
 
 
@@ -738,7 +823,7 @@ async def create_order(request: OrderRequest):
     
     order_id = f"order_{uuid.uuid4().hex[:8]}"
     
-    # Create order in database
+    # 创建订单记录
     order_data = {
         'id': order_id,
         'agent_id': request.agent_id,
@@ -751,17 +836,18 @@ async def create_order(request: OrderRequest):
     }
     OrderRepository.create(order_data)
     
-    # Execute on exchange
-    result = await exchange_manager.create_order(
-        agent['exchange_id'],
-        request.symbol,
-        request.order_type,
-        request.side,
-        request.amount,
-        request.price
-    )
+    # 在交易所执行
+    exchange = exchange_manager.get_exchange(agent['exchange_id'])
+    if not exchange:
+        OrderRepository.update(order_id, {'status': 'failed'})
+        raise HTTPException(status_code=500, detail="Exchange not connected")
     
-    if result:
+    try:
+        if request.order_type == 'market':
+            result = await exchange.create_market_order(request.symbol, request.side, request.amount)
+        else:
+            result = await exchange.create_limit_order(request.symbol, request.side, request.amount, request.price)
+        
         OrderRepository.update(order_id, {
             'status': 'filled',
             'exchange_order_id': result.get('id'),
@@ -769,17 +855,23 @@ async def create_order(request: OrderRequest):
             'filled_price': result.get('average', request.price)
         })
         
-        # Log conversation
+        # 记录对话
         ConversationRepository.add_message(
             request.agent_id,
             'tool',
             f"Order executed: {request.side} {request.amount} {request.symbol} @ {result.get('average', 'market')}"
         )
         
+        ActivityLogRepository.log('info', f"Order created: {request.side} {request.amount} {request.symbol}", 
+                                 details={'order': result})
+        
         return {"success": True, "order": result}
-    else:
+    
+    except Exception as e:
+        logger.error(f"Error creating order: {e}")
         OrderRepository.update(order_id, {'status': 'failed'})
-        raise HTTPException(status_code=500, detail="Failed to create order")
+        ActivityLogRepository.log('error', f"Order failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to create order: {str(e)}")
 
 
 # ============== Activity Logs API ==============
@@ -829,31 +921,42 @@ async def run_agent_loop(agent_id: str):
             symbol = agent['symbol']
             timeframe = agent['timeframe']
             
-            # Get market data
-            klines = await exchange_manager.get_klines(exchange_id, symbol, timeframe, 100)
-            if not klines:
+            # 获取交易所实例
+            exchange = exchange_manager.get_exchange(exchange_id)
+            if not exchange:
+                logger.error(f"Exchange {exchange_id} not available for agent {agent_id}")
                 await asyncio.sleep(10)
                 continue
             
-            # Calculate indicators
-            indicators = IndicatorCalculator.calculate_all(klines)
+            # 获取市场数据
+            try:
+                klines = await exchange.fetch_ohlcv(symbol, timeframe, 100)
+                if not klines:
+                    await asyncio.sleep(10)
+                    continue
+                
+                # 计算指标
+                indicators = IndicatorCalculator.calculate_all(klines)
+                
+                # 记录分析
+                ConversationRepository.add_message(
+                    agent_id,
+                    'system',
+                    f"Market analysis: {symbol} @ {indicators.get('current_price', 'N/A')} | RSI: {indicators.get('rsi', 'N/A')} | ADX: {indicators.get('adx', 'N/A')}"
+                )
+                
+                # 广播到 WebSocket 客户端
+                await connection_manager.broadcast({
+                    'type': 'agent_update',
+                    'agent_id': agent_id,
+                    'indicators': indicators,
+                    'timestamp': datetime.now().isoformat()
+                })
             
-            # Log analysis
-            ConversationRepository.add_message(
-                agent_id,
-                'system',
-                f"Market analysis: {symbol} @ {indicators.get('current_price', 'N/A')} | RSI: {indicators.get('rsi', 'N/A')} | ADX: {indicators.get('adx', 'N/A')}"
-            )
+            except Exception as e:
+                logger.error(f"Error analyzing market for agent {agent_id}: {e}")
             
-            # Broadcast to WebSocket clients
-            await connection_manager.broadcast({
-                'type': 'agent_update',
-                'agent_id': agent_id,
-                'indicators': indicators,
-                'timestamp': datetime.now().isoformat()
-            })
-            
-            # Sleep based on timeframe
+            # 根据 timeframe 调整睡眠时间
             sleep_map = {'1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400}
             await asyncio.sleep(sleep_map.get(timeframe, 60))
             
