@@ -32,6 +32,8 @@ from database import (
     ActivityLogRepository
 )
 from exchange_manager import ExchangeManager
+from agent_manager import AgentManager
+from routes.agent_conversation_routes import router as conversation_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -257,13 +259,15 @@ class IndicatorCalculator:
 
 connection_manager = ConnectionManager()
 exchange_manager = ExchangeManager()
-running_agents: Dict[str, asyncio.Task] = {}
+agent_manager: Optional[AgentManager] = None  # Will be initialized in lifespan
 
 
 # ============== FastAPI App ==============
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global agent_manager
+    
     init_database()
     logger.info("Database initialized")
     
@@ -292,13 +296,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"初始化交易所失败: {e}")
     
+    # 初始化 AgentManager
+    agent_manager = AgentManager(exchange_manager)
+    logger.info("AgentManager initialized")
+    
     ActivityLogRepository.log('info', 'Backend server started')
     
     yield
     
     # Cleanup
-    for agent_id, task in running_agents.items():
-        task.cancel()
+    if agent_manager:
+        await agent_manager.cleanup()
     
     await exchange_manager.close_all()
     ActivityLogRepository.log('info', 'Backend server stopped')
@@ -314,17 +322,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 注册路由
+app.include_router(conversation_router)
+
 
 # ============== Health Check ==============
 
 @app.get("/health")
 async def health_check():
+    running_count = len(agent_manager.get_all_agents()) if agent_manager else 0
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "active_connections": len(connection_manager.active_connections),
         "connected_exchanges": len(exchange_manager.exchanges),
-        "running_agents": len(running_agents)
+        "running_agents": running_count
     }
 
 
@@ -358,11 +370,29 @@ async def create_model(config: AIModelConfig):
 
 @app.delete("/api/models/{model_id}")
 async def delete_model(model_id: str):
+    # 检查是否有agent使用这个model
+    agents = AgentRepository.get_by_model_id(model_id)
+    if agents:
+        agent_names = [agent['name'] for agent in agents]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete model. It is used by {len(agents)} agent(s): {', '.join(agent_names)}"
+        )
+    
     if AIModelRepository.delete(model_id):
         ActivityLogRepository.log('info', f"Deleted AI model", details={'model_id': model_id})
         return {"success": True}
     raise HTTPException(status_code=404, detail="Model not found")
 
+
+@app.get("/api/models/{model_id}/usage")
+async def check_model_usage(model_id: str):
+    """检查model是否被agent使用"""
+    agents = AgentRepository.get_by_model_id(model_id)
+    return {
+        "isUsed": len(agents) > 0,
+        "agents": [{"id": a['id'], "name": a['name'], "status": a['status']} for a in agents]
+    }
 
 @app.put("/api/models/{model_id}")
 async def update_model(model_id: str, data: dict):
@@ -546,6 +576,15 @@ async def disconnect_exchange(exchange_id: str):
 @app.delete("/api/exchanges/{exchange_id}")
 async def delete_exchange(exchange_id: str):
     """删除交易所"""
+    # 检查是否有agent使用这个exchange
+    agents = AgentRepository.get_by_exchange_id(exchange_id)
+    if agents:
+        agent_names = [agent['name'] for agent in agents]
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete exchange. It is used by {len(agents)} agent(s): {', '.join(agent_names)}"
+        )
+    
     await exchange_manager.remove_exchange(exchange_id)
     
     if ExchangeRepository.delete(exchange_id):
@@ -553,6 +592,16 @@ async def delete_exchange(exchange_id: str):
         return {"success": True}
     
     raise HTTPException(status_code=404, detail="Exchange not found")
+
+
+@app.get("/api/exchanges/{exchange_id}/usage")
+async def check_exchange_usage(exchange_id: str):
+    """检查exchange是否被agent使用"""
+    agents = AgentRepository.get_by_exchange_id(exchange_id)
+    return {
+        "isUsed": len(agents) > 0,
+        "agents": [{"id": a['id'], "name": a['name'], "status": a['status']} for a in agents]
+    }
 
 
 # ============== Agents API ==============
@@ -572,7 +621,12 @@ async def get_agent(agent_id: str):
 
 @app.post("/api/agents")
 async def create_agent(config: AgentConfig):
+    if not agent_manager:
+        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+    
     agent_id = config.id or f"agent_{uuid.uuid4().hex[:8]}"
+    
+    # 保存到数据库
     agent_data = {
         'id': agent_id,
         'name': config.name,
@@ -588,49 +642,103 @@ async def create_agent(config: AgentConfig):
         'status': 'stopped'
     }
     result = AgentRepository.create(agent_data)
-    ActivityLogRepository.log('info', f"Created agent: {config.name}", agent_id=agent_id)
-    return result
+    
+    # 创建 Agent 实例
+    try:
+        agent_config = {
+            'max_position_size': config.max_position_size,
+            'risk_per_trade': config.risk_per_trade,
+            'default_leverage': config.default_leverage,
+            'decision_interval': 60  # 默认60秒决策一次
+        }
+        
+        await agent_manager.create_agent(
+            agent_id=agent_id,
+            name=config.name,
+            model_id=config.model_id,
+            exchange_id=config.exchange_id,
+            symbol=config.symbol,
+            timeframe=config.timeframe,
+            indicators=config.indicators,
+            prompt=config.prompt,
+            config=agent_config
+        )
+        
+        ActivityLogRepository.log('info', f"Created agent: {config.name}", agent_id=agent_id)
+        return result
+    except Exception as e:
+        # 如果创建失败，从数据库删除
+        AgentRepository.delete(agent_id)
+        logger.error(f"Failed to create agent: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/agents/{agent_id}/start")
 async def start_agent(agent_id: str):
+    if not agent_manager:
+        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+    
     agent = AgentRepository.get_by_id(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    if agent_id in running_agents:
-        return {"success": True, "status": "already_running"}
+    # 如果 Agent 实例不存在，先创建
+    if not agent_manager.get_agent(agent_id):
+        agent_config = {
+            'max_position_size': agent.get('max_position_size', 1000.0),
+            'risk_per_trade': agent.get('risk_per_trade', 0.02),
+            'default_leverage': agent.get('default_leverage', 1),
+            'decision_interval': 60
+        }
+        
+        await agent_manager.create_agent(
+            agent_id=agent_id,
+            name=agent['name'],
+            model_id=agent['model_id'],
+            exchange_id=agent['exchange_id'],
+            symbol=agent['symbol'],
+            timeframe=agent['timeframe'],
+            indicators=agent['indicators'],
+            prompt=agent['prompt'],
+            config=agent_config
+        )
     
-    # Start agent task
-    task = asyncio.create_task(run_agent_loop(agent_id))
-    running_agents[agent_id] = task
+    # 启动 Agent
+    success = await agent_manager.start_agent(agent_id)
     
-    AgentRepository.update(agent_id, {'status': 'running'})
-    ActivityLogRepository.log('info', f"Started agent", agent_id=agent_id)
-    
-    return {"success": True, "status": "running"}
+    if success:
+        ActivityLogRepository.log('info', f"Started agent", agent_id=agent_id)
+        return {"success": True, "status": "running"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to start agent")
 
 
 @app.post("/api/agents/{agent_id}/stop")
 async def stop_agent(agent_id: str):
-    if agent_id in running_agents:
-        running_agents[agent_id].cancel()
-        del running_agents[agent_id]
+    if not agent_manager:
+        raise HTTPException(status_code=500, detail="Agent manager not initialized")
     
-    AgentRepository.update(agent_id, {'status': 'stopped'})
-    ActivityLogRepository.log('info', f"Stopped agent", agent_id=agent_id)
+    success = await agent_manager.stop_agent(agent_id)
     
-    return {"success": True, "status": "stopped"}
+    if success:
+        ActivityLogRepository.log('info', f"Stopped agent", agent_id=agent_id)
+        return {"success": True, "status": "stopped"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to stop agent")
 
 
 @app.delete("/api/agents/{agent_id}")
 async def delete_agent(agent_id: str):
-    if agent_id in running_agents:
-        running_agents[agent_id].cancel()
-        del running_agents[agent_id]
+    if not agent_manager:
+        raise HTTPException(status_code=500, detail="Agent manager not initialized")
     
-    if AgentRepository.delete(agent_id):
+    success = await agent_manager.delete_agent(agent_id)
+    
+    if success:
         ActivityLogRepository.log('info', f"Deleted agent", agent_id=agent_id)
+        return {"success": True}
+    else:
+        raise HTTPException(status_code=404, detail="Agent not found")
         return {"success": True}
     raise HTTPException(status_code=404, detail="Agent not found")
 
@@ -748,19 +856,7 @@ async def get_agent_orders(agent_id: str, limit: int = 50):
     return OrderRepository.get_by_agent(agent_id, limit)
 
 
-@app.get("/api/agents/{agent_id}/conversations")
-async def get_agent_conversations(agent_id: str, limit: int = 100):
-    return ConversationRepository.get_by_agent(agent_id, limit)
 
-
-@app.get("/api/agents/{agent_id}/tool-calls")
-async def get_agent_tool_calls(agent_id: str, limit: int = 50):
-    return ToolCallRepository.get_by_agent(agent_id, limit)
-
-
-@app.get("/api/agents/{agent_id}/signals")
-async def get_agent_signals(agent_id: str, limit: int = 50):
-    return SignalRepository.get_by_agent(agent_id, limit)
 
 
 @app.get("/api/agents/{agent_id}/profit-history")

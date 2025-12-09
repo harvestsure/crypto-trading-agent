@@ -98,6 +98,17 @@ export async function deleteModel(modelId: string) {
   })
 }
 
+export async function checkModelUsage(modelId: string) {
+  return fetchApi<{
+    isUsed: boolean
+    agents: Array<{
+      id: string
+      name: string
+      status: string
+    }>
+  }>(`/api/models/${modelId}/usage`)
+}
+
 // ============== Exchanges ==============
 
 export async function getExchanges() {
@@ -168,6 +179,17 @@ export async function disconnectExchange(exchangeId: string) {
 // Backwards-compatible alias used by client store
 export async function deleteExchange(exchangeId: string) {
   return disconnectExchange(exchangeId)
+}
+
+export async function checkExchangeUsage(exchangeId: string) {
+  return fetchApi<{
+    isUsed: boolean
+    agents: Array<{
+      id: string
+      name: string
+      status: string
+    }>
+  }>(`/api/exchanges/${exchangeId}/usage`)
 }
 
 // ============== Agents ==============

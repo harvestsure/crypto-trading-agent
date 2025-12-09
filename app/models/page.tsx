@@ -11,7 +11,8 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { Plus, MoreVertical, Brain, Trash2, Edit, Loader2 } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { Plus, MoreVertical, Brain, Trash2, Edit, Loader2, AlertCircle, X } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export default function ModelsPage() {
@@ -23,11 +24,15 @@ export default function ModelsPage() {
     mutate()
   }, [mutate])
   const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
 
   const handleDelete = async (id: string) => {
+    setDeleteError(null)
     const result = await deleteModel(id)
     if (result.success) {
       mutate() // Refresh data
+    } else {
+      setDeleteError(result.error || "Failed to delete model")
     }
   }
 
@@ -46,6 +51,17 @@ export default function ModelsPage() {
         <Header title="AI Models" description="Manage your AI model configurations" />
 
         <div className="p-6">
+          {deleteError && (
+            <Alert variant="destructive" className="mb-4">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription className="ml-2 flex items-center justify-between">
+                <span>{deleteError}</span>
+                <button onClick={() => setDeleteError(null)} className="ml-4 hover:opacity-70">
+                  <X className="h-4 w-4" />
+                </button>
+              </AlertDescription>
+            </Alert>
+          )}
           <div className="mb-6 flex items-center justify-between">
             <div>
               {isLoading ? (

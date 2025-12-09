@@ -393,6 +393,32 @@ class AgentRepository:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM agents WHERE id = ?", (agent_id,))
             return cursor.rowcount > 0
+    
+    @staticmethod
+    def get_by_model_id(model_id: str) -> List[Dict[str, Any]]:
+        """获取使用指定model的所有agents"""
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM agents WHERE model_id = ?", (model_id,))
+            results = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                data['indicators'] = json.loads(data['indicators'])
+                results.append(data)
+            return results
+    
+    @staticmethod
+    def get_by_exchange_id(exchange_id: str) -> List[Dict[str, Any]]:
+        """获取使用指定exchange的所有agents"""
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM agents WHERE exchange_id = ?", (exchange_id,))
+            results = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                data['indicators'] = json.loads(data['indicators'])
+                results.append(data)
+            return results
 
 
 # ============== Orders CRUD ==============
