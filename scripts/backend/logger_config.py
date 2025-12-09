@@ -7,6 +7,7 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from datetime import datetime
 
 
 class LoggerManager:
@@ -62,8 +63,11 @@ class LoggerManager:
         console_handler.setFormatter(log_format)
         root_logger.addHandler(console_handler)
         
-        # File Handler - app.log (INFO level，减少文件大小)
-        app_log_path = os.path.join(self.log_dir, "app.log")
+        # 生成带日期时间的日志文件名
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # File Handler - app_日期_时间.log (INFO level，减少文件大小)
+        app_log_path = os.path.join(self.log_dir, f"app_{timestamp}.log")
         app_file_handler = RotatingFileHandler(
             app_log_path,
             maxBytes=10 * 1024 * 1024,  # 10MB
@@ -74,8 +78,8 @@ class LoggerManager:
         app_file_handler.setFormatter(log_format)
         root_logger.addHandler(app_file_handler)
         
-        # File Handler - error.log (ERROR level，仅错误)
-        error_log_path = os.path.join(self.log_dir, "error.log")
+        # File Handler - error_日期_时间.log (ERROR level，仅错误)
+        error_log_path = os.path.join(self.log_dir, f"error_{timestamp}.log")
         error_file_handler = RotatingFileHandler(
             error_log_path,
             maxBytes=10 * 1024 * 1024,  # 10MB

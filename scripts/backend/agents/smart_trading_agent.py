@@ -20,6 +20,7 @@ from models.llm_model import LLMModel
 from tools.tool_registry import ToolRegistry
 from exchanges.common_exchange import CommonExchange
 from common.data_types import DataEventType, DataEvent
+from prompts.trading_prompts import get_prompt_template
 
 logger = logging.getLogger(__name__)
 
@@ -341,9 +342,9 @@ class SmartTradingAgent(BaseAgent):
             # 5. 获取工具定义
             tools = self.tool_registry.get_openai_tools()
             
-            # 6. 调用 LLM
+            # 6. 调用 LLM (使用异步调用避免阻塞事件循环)
             logger.info(f"Calling LLM for decision...")
-            response = self.llm_model.chat_completion(
+            response = await self.llm_model.chat_completion_async(
                 user_message=prompt,
                 tools=tools if tools else None,
             )
@@ -708,7 +709,7 @@ class SmartTradingAgent(BaseAgent):
     ) -> str:
         """构建LLM提示词"""
         prompt = f"""
-你是一个专业的加密货币交易助手。请根据以下信息分析市场并给出交易建议。
+{get_prompt_template()}
 
 {market.to_llm_prompt()}
 
