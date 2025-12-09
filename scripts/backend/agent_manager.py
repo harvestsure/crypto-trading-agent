@@ -85,6 +85,9 @@ class AgentManager:
                 base_url=model_config.get('base_url'),
                 provider=model_config.get('provider', 'openai'),
                 temperature=0.7,
+                agent_id=agent_id,
+                agent_name=name,
+                enable_cache=True,
             )
             
             # 4. 创建工具注册表

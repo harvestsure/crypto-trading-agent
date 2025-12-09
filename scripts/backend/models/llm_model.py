@@ -9,6 +9,8 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from openai import OpenAI, AsyncOpenAI
 import tiktoken
+from conversation_logger import ConversationLoggerFactory
+from prompt_cache import PromptCacheManager, CacheConfig
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +162,10 @@ class LLMModel:
         provider: str = "openai",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        agent_id: Optional[str] = None,
+        agent_name: Optional[str] = None,
+        enable_cache: bool = True,
+        cache_provider: Optional[str] = None,
     ):
         """
         初始化 LLM 模型
@@ -171,6 +177,10 @@ class LLMModel:
             provider: 提供商名称 ('openai', 'deepseek', 等)
             temperature: 温度参数
             max_tokens: 最大输出 token 数
+            agent_id: Agent ID for conversation logging
+            agent_name: Agent name for conversation logging
+            enable_cache: Whether to enable prompt caching
+            cache_provider: Cache provider type (defaults to main provider)
         """
         self.api_key = api_key
         self.model = model
@@ -178,6 +188,22 @@ class LLMModel:
         self.provider = provider
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.agent_id = agent_id
+        self.agent_name = agent_name
+        
+        # Initialize conversation logger if agent info is provided
+        self.conversation_logger = None
+        if agent_id and agent_name:
+            self.conversation_logger = ConversationLoggerFactory.get_logger(
+                agent_id, agent_name
+            )
+        
+        # Initialize prompt cache manager
+        cache_config = CacheConfig(
+            enabled=enable_cache,
+            provider=cache_provider or provider,
+        )
+        self.cache_manager = PromptCacheManager(cache_config)
         
         # 初始化同步和异步客户端
         client_kwargs = {
@@ -191,24 +217,40 @@ class LLMModel:
         
         self.token_counter = TokenCounter(model)
         self.conversation = None
+        self.system_prompt = None
         
         # 记录配置信息
         logger.info(
             f"LLMModel initialized - Provider: {provider}, Model: {model}, "
-            f"Base URL: {base_url or 'default'}"
+            f"Base URL: {base_url or 'default'}, Agent: {agent_name or 'N/A'}, "
+            f"Cache Enabled: {enable_cache}"
         )
     
     def create_conversation(self, system_prompt: str) -> ConversationHistory:
         """创建新的对话"""
+        self.system_prompt = system_prompt
         self.conversation = ConversationHistory(self.model)
         self.conversation.add_system_message(system_prompt)
         return self.conversation
     
     def _build_request_params(self, tools: Optional[List[Dict]] = None) -> Dict[str, Any]:
         """构建 API 请求参数"""
+        # Build messages with cache control if enabled
+        messages = self.conversation.get_messages_for_api()
+        if self.cache_manager.is_cache_enabled() and self.system_prompt:
+            # 使用缓存管理器构建消息，系统提示作为缓存点
+            system_msg = messages[0] if messages and messages[0].get("role") == "system" else None
+            other_msgs = messages[1:] if messages and messages[0].get("role") == "system" else messages
+            
+            messages = self.cache_manager.build_cached_messages(
+                self.system_prompt,
+                other_msgs,
+                cache_system_prompt=True
+            )
+        
         params = {
             "model": self.model,
-            "messages": self.conversation.get_messages_for_api(),
+            "messages": messages,
             "temperature": self.temperature,
         }
         
@@ -241,6 +283,10 @@ class LLMModel:
         if not self.conversation:
             raise ValueError("未初始化对话，请先调用 create_conversation")
         
+        # Log user input
+        if self.conversation_logger:
+            self.conversation_logger.log_user_input(user_message)
+        
         # 添加用户消息
         self.conversation.add_user_message(user_message)
         
@@ -251,6 +297,9 @@ class LLMModel:
         
         # 调用 API
         response = self.client.chat.completions.create(**params)
+        
+        # 解析缓存使用情况
+        cache_usage = self.cache_manager.parse_cache_usage(response)
         
         # 解析响应
         assistant_message = response.choices[0].message
@@ -279,6 +328,26 @@ class LLMModel:
         content = assistant_message.content or ""
         self.conversation.add_assistant_message(content, tool_calls)
         
+        # Log assistant output with token and cost info
+        if self.conversation_logger:
+            self.conversation_logger.log_assistant_output(
+                content=content,
+                tool_calls=tool_calls,
+                tokens_info={
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                    "cache_read_tokens": cache_usage.get("cache_read_tokens", 0),
+                    "cache_creation_tokens": cache_usage.get("cache_creation_tokens", 0),
+                },
+                cost_info={
+                    "input_cost": cost_info["input_cost"],
+                    "output_cost": cost_info["output_cost"],
+                    "total_cost": cost_info["total_cost"],
+                    "cache_savings": cache_usage.get("cost_saved", 0.0),
+                }
+            )
+        
         result = {
             "content": content,
             "tool_calls": tool_calls,
@@ -286,9 +355,18 @@ class LLMModel:
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
             "cost": cost_info,
+            "cache": {
+                "hit": cache_usage.get("cache_hit", False),
+                "read_tokens": cache_usage.get("cache_read_tokens", 0),
+                "creation_tokens": cache_usage.get("cache_creation_tokens", 0),
+                "cost_saved": cache_usage.get("cost_saved", 0.0),
+            },
         }
         
-        logger.info(f"LLM Response - Tokens: {input_tokens + output_tokens}, Cost: ${cost_info['total_cost']:.6f}")
+        logger.info(
+            f"LLM Response - Tokens: {input_tokens + output_tokens}, Cost: ${cost_info['total_cost']:.6f}, "
+            f"Cache Hit: {cache_usage.get('cache_hit', False)}, Saved: ${cache_usage.get('cost_saved', 0.0):.6f}"
+        )
         
         return result
     
@@ -302,6 +380,10 @@ class LLMModel:
         if not self.conversation:
             raise ValueError("未初始化对话，请先调用 create_conversation")
         
+        # Log user input
+        if self.conversation_logger:
+            self.conversation_logger.log_user_input(user_message)
+        
         # 添加用户消息
         self.conversation.add_user_message(user_message)
         
@@ -312,6 +394,9 @@ class LLMModel:
         
         # 调用 API
         response = await self.async_client.chat.completions.create(**params)
+        
+        # 解析缓存使用情况
+        cache_usage = self.cache_manager.parse_cache_usage(response)
         
         # 解析响应
         assistant_message = response.choices[0].message
@@ -340,6 +425,26 @@ class LLMModel:
         content = assistant_message.content or ""
         self.conversation.add_assistant_message(content, tool_calls)
         
+        # Log assistant output with token and cost info
+        if self.conversation_logger:
+            self.conversation_logger.log_assistant_output(
+                content=content,
+                tool_calls=tool_calls,
+                tokens_info={
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "total_tokens": input_tokens + output_tokens,
+                    "cache_read_tokens": cache_usage.get("cache_read_tokens", 0),
+                    "cache_creation_tokens": cache_usage.get("cache_creation_tokens", 0),
+                },
+                cost_info={
+                    "input_cost": cost_info["input_cost"],
+                    "output_cost": cost_info["output_cost"],
+                    "total_cost": cost_info["total_cost"],
+                    "cache_savings": cache_usage.get("cost_saved", 0.0),
+                }
+            )
+        
         result = {
             "content": content,
             "tool_calls": tool_calls,
@@ -347,15 +452,34 @@ class LLMModel:
             "output_tokens": output_tokens,
             "total_tokens": input_tokens + output_tokens,
             "cost": cost_info,
+            "cache": {
+                "hit": cache_usage.get("cache_hit", False),
+                "read_tokens": cache_usage.get("cache_read_tokens", 0),
+                "creation_tokens": cache_usage.get("cache_creation_tokens", 0),
+                "cost_saved": cache_usage.get("cost_saved", 0.0),
+            },
         }
         
-        logger.info(f"LLM Response - Tokens: {input_tokens + output_tokens}, Cost: ${cost_info['total_cost']:.6f}")
+        logger.info(
+            f"LLM Response - Tokens: {input_tokens + output_tokens}, Cost: ${cost_info['total_cost']:.6f}, "
+            f"Cache Hit: {cache_usage.get('cache_hit', False)}, Saved: ${cache_usage.get('cost_saved', 0.0):.6f}"
+        )
         
         return result
     
     def add_tool_result(self, tool_call_id: str, result: str) -> str:
         """添加工具结果到对话"""
         self.conversation.add_tool_result(tool_call_id, result)
+        
+        # Log tool result
+        if self.conversation_logger:
+            self.conversation_logger.log_tool_result(
+                tool_call_id=tool_call_id,
+                tool_name="unknown",
+                result=result,
+                status="success"
+            )
+        
         logger.info(f"Tool result added for call {tool_call_id}")
         return tool_call_id
     
@@ -390,4 +514,19 @@ class LLMModel:
             "base_url": self.base_url or "default",
             "temperature": self.temperature,
             "max_tokens": self.max_tokens,
+            "cache_config": self.cache_manager.get_config(),
         }
+    
+    def enable_cache(self, enable: bool = True) -> None:
+        """Enable or disable prompt caching"""
+        self.cache_manager.update_config(enabled=enable)
+        logger.info(f"Prompt caching {'enabled' if enable else 'disabled'}")
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get prompt cache statistics"""
+        return self.cache_manager.get_cache_stats()
+    
+    def reset_cache_stats(self) -> None:
+        """Reset cache statistics"""
+        self.cache_manager.reset_stats()
+        logger.info("Cache statistics reset")

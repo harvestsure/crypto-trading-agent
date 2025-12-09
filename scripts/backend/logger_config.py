@@ -42,10 +42,19 @@ class LoggerManager:
         
         # 获取根logger
         root_logger = logging.getLogger()
-        root_logger.setLevel(logging.DEBUG)
+        root_logger.setLevel(logging.INFO)  # 改为 INFO，减少调试日志
         
         # 清空已有的handlers（避免重复添加）
         root_logger.handlers.clear()
+        
+        # 关闭第三方库的 DEBUG 日志
+        logging.getLogger('numba').setLevel(logging.WARNING)
+        logging.getLogger('numba.core').setLevel(logging.WARNING)
+        logging.getLogger('numba.core.byteflow').setLevel(logging.WARNING)
+        logging.getLogger('urllib3').setLevel(logging.WARNING)
+        logging.getLogger('requests').setLevel(logging.WARNING)
+        logging.getLogger('websocket').setLevel(logging.WARNING)
+        logging.getLogger('ccxt').setLevel(logging.INFO)
         
         # Console Handler (INFO level)
         console_handler = logging.StreamHandler()
@@ -53,7 +62,7 @@ class LoggerManager:
         console_handler.setFormatter(log_format)
         root_logger.addHandler(console_handler)
         
-        # File Handler - app.log (DEBUG level，所有日志)
+        # File Handler - app.log (INFO level，减少文件大小)
         app_log_path = os.path.join(self.log_dir, "app.log")
         app_file_handler = RotatingFileHandler(
             app_log_path,
@@ -61,7 +70,7 @@ class LoggerManager:
             backupCount=5,  # 保留5个备份
             encoding='utf-8'
         )
-        app_file_handler.setLevel(logging.DEBUG)
+        app_file_handler.setLevel(logging.INFO)
         app_file_handler.setFormatter(log_format)
         root_logger.addHandler(app_file_handler)
         
