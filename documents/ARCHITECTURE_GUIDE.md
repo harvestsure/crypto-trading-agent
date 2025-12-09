@@ -132,8 +132,6 @@ class PlaceOrderTool(BaseTool):
         '''执行工具'''
         order = await self.exchange_manager.place_order(symbol, side, amount, price)
         return json.dumps(order)
-
-
 # Step 2: 初始化 Agent
 from models.llm_model import LLMModel
 from agents.trading_agent import TradingAgent
@@ -141,7 +139,9 @@ from agents.trading_agent import TradingAgent
 # 初始化 LLM 模型
 llm = LLMModel(
     api_key="your-api-key",
-    model="gpt-4o-mini",
+    model="gpt-44-mini",  # 或其他模型
+    base_url="https://api.openai.com/v1",  # 或 https://api.deepseek.com 等
+    provider="openai",  # 或 'deepseek', 等
     temperature=0.7,
 )
 

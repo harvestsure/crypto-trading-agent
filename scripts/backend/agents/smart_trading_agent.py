@@ -11,6 +11,10 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
+import pandas as pd
+import pandas_ta as ta
+import numpy as np
+
 from agents.base_agent import BaseAgent, AgentStatus
 from models.llm_model import LLMModel
 from tools.tool_registry import ToolRegistry
@@ -145,7 +149,6 @@ class SmartTradingAgent(BaseAgent):
         self.config = config or {}
         
         # 数据缓存
-        self.klines_history: List[List] = []
         self.current_ticker: Optional[Dict] = None
         self.current_orderbook: Optional[Dict] = None
         self.current_positions: List[Dict] = []
@@ -166,17 +169,26 @@ class SmartTradingAgent(BaseAgent):
         # 初始化对话
         self.llm_model.create_conversation(self.system_prompt)
         
+        # K线数据管理（使用DataFrame）
+        self.df = pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+        self.df['timestamp'] = pd.to_datetime(self.df['timestamp'])
+        self.df.set_index('timestamp', inplace=True)
+        
+        # 数据处理参数
+        self.max_kline_history = self.config.get('max_kline_history', 500)
+        self.last_kline_timestamp = None
+        self.last_decision_time = 0  # 上次决策时间
+        self.min_decision_interval = self.config.get('min_decision_interval', 120)  # 最小决策间隔(秒)
+        self.lock = asyncio.Lock()
+        
         logger.info(f"SmartTradingAgent {self.name} initialized for {symbol} @ {timeframe}")
     
     async def _on_initialize(self):
         """初始化 Agent"""
         # 1. 加载历史K线
         await self._load_historical_klines()
-        
-        # 2. 订阅实时数据
-        await self._subscribe_market_data()
-        
-        # 3. 启动决策循环
+               
+        # 2. 启动决策循环
         self.decision_loop_task = asyncio.create_task(self._decision_loop())
         
         logger.info(f"Agent {self.name} initialized and running")
@@ -191,116 +203,69 @@ class SmartTradingAgent(BaseAgent):
             except asyncio.CancelledError:
                 pass
         
-        # 取消所有订阅
-        await self._unsubscribe_market_data()
-        
         logger.info(f"Agent {self.name} cleaned up")
     
+    async def execute(self, task: str, context: Optional[Dict[str, Any]] = None):
+        """
+        执行任务（实现抽象方法）
+        对于 SmartTradingAgent，实时决策循环已在 _on_initialize 中启动
+        此方法提供外部执行接口
+        
+        Args:
+            task: 任务描述
+            context: 执行上下文
+        """
+        self.current_task = task
+        self.add_message("user", task)
+        logger.info(f"Agent {self.name} executing task: {task}")
+        
+        # SmartTradingAgent 通过自动决策循环运行，这里主要作为接口实现
+        # 如果需要执行特定任务，可以将其添加到任务队列
+        # 当前实现中，Agent 已在 _on_initialize 中启动自动决策循环
+    
     async def _load_historical_klines(self):
-        """加载历史K线数据"""
+        """加载历史K线数据并初始化指标"""
         try:
             logger.info(f"Loading historical klines for {self.symbol} @ {self.timeframe}")
             
-            # 加载最近200根K线
+            # 加载最近500根K线
             klines = await self.exchange.fetch_ohlcv(
                 symbol=self.symbol,
                 timeframe=self.timeframe,
-                limit=200
+                limit=self.max_kline_history
             )
             
             if klines:
-                self.klines_history = klines
                 logger.info(f"Loaded {len(klines)} historical klines")
+                
+                # 构建DataFrame并计算指标
+                await self._process_klines_batch(klines, is_history=True)
             else:
                 logger.warning("No historical klines loaded")
                 
         except Exception as e:
-            logger.error(f"Error loading historical klines: {e}", exc_info=True)
-    
-    async def _subscribe_market_data(self):
-        """订阅实时市场数据"""
-        try:
-            logger.info(f"Subscribing to market data for {self.symbol}")
-            
-            # 订阅K线
-            await self.exchange.subscribe_data(DataEventType.OHLCV, [self.symbol])
-            
-            # 订阅Ticker
-            await self.exchange.subscribe_data(DataEventType.TICKER, [self.symbol])
-            
-            # 订阅订单簿
-            await self.exchange.subscribe_data(DataEventType.ORDERBOOK, [self.symbol])
-            
-            # 订阅成交数据
-            await self.exchange.subscribe_data(DataEventType.TRADE, [self.symbol])
-            
-            # 注册数据事件回调
-            self.exchange.event_bus.subscribe(
-                DataEventType.OHLCV,
-                self.symbol,
-                self._on_kline_update
-            )
-            self.exchange.event_bus.subscribe(
-                DataEventType.TICKER,
-                self.symbol,
-                self._on_ticker_update
-            )
-            self.exchange.event_bus.subscribe(
-                DataEventType.ORDERBOOK,
-                self.symbol,
-                self._on_orderbook_update
-            )
-            
-            # 订阅账户数据 (持仓、订单、余额)
-            self.exchange.event_bus.subscribe(
-                DataEventType.POSITION,
-                self.symbol,
-                self._on_position_update
-            )
-            self.exchange.event_bus.subscribe(
-                DataEventType.ORDER,
-                self.symbol,
-                self._on_order_update
-            )
-            
-            logger.info(f"Successfully subscribed to market data for {self.symbol}")
-            
-        except Exception as e:
-            logger.error(f"Error subscribing to market data: {e}", exc_info=True)
-    
-    async def _unsubscribe_market_data(self):
-        """取消订阅市场数据"""
-        try:
-            await self.exchange.unsubscribe_data(DataEventType.OHLCV, [self.symbol])
-            await self.exchange.unsubscribe_data(DataEventType.TICKER, [self.symbol])
-            await self.exchange.unsubscribe_data(DataEventType.ORDERBOOK, [self.symbol])
-            await self.exchange.unsubscribe_data(DataEventType.TRADE, [self.symbol])
-            
-            logger.info(f"Unsubscribed from market data for {self.symbol}")
-        except Exception as e:
-            logger.error(f"Error unsubscribing from market data: {e}", exc_info=True)
-    
+            logger.error(f"Error loading historical klines: {e}", exc_info=True)   
+
+
     # ========== 数据事件回调 ==========
     
     async def _on_kline_update(self, event: DataEvent):
-        """K线更新回调"""
+        """K线更新回调 - 处理新K线和K线更新"""
         try:
             kline = event.data
-            # 更新K线历史
-            if self.klines_history:
-                # 检查是否是新K线
-                last_kline = self.klines_history[-1]
-                if kline[0] > last_kline[0]:  # 新K线
-                    self.klines_history.append(kline)
-                    # 保持最多200根K线
-                    if len(self.klines_history) > 200:
-                        self.klines_history.pop(0)
-                else:  # 更新当前K线
-                    self.klines_history[-1] = kline
-            else:
-                self.klines_history = [kline]
+            current_time = datetime.now().timestamp()
+            
+            async with self.lock:
+                # 检查是否是新K线：比较时间戳
+                is_new_candle = False
+                if self.last_kline_timestamp is None or kline[0] > self.last_kline_timestamp:
+                    is_new_candle = True
+                    self.last_kline_timestamp = kline[0]
                 
-            logger.debug(f"Kline updated: {kline}")
+                # 处理K线数据
+                await self._process_kline_update(kline, is_new_candle, current_time)
+                
+                logger.debug(f"Kline {'new' if is_new_candle else 'updated'}: O={kline[1]}, H={kline[2]}, L={kline[3]}, C={kline[4]}")
         except Exception as e:
             logger.error(f"Error handling kline update: {e}", exc_info=True)
     
@@ -399,16 +364,29 @@ class SmartTradingAgent(BaseAgent):
         
         # 获取当前价格
         current_price = 0.0
-        if self.current_ticker:
+        if len(self.df) > 0:
+            current_price = self.df['close'].iloc[-1]
+        elif self.current_ticker:
             current_price = self.current_ticker.get('last', 0)
-        elif self.klines_history:
-            current_price = self.klines_history[-1][4]  # 收盘价
+        
+        # 获取最近50根K线数据
+        klines = []
+        if len(self.df) > 0:
+            for idx, row in self.df.tail(50).iterrows():
+                klines.append([
+                    int(idx.timestamp() * 1000),
+                    float(row['open']),
+                    float(row['high']),
+                    float(row['low']),
+                    float(row['close']),
+                    float(row['volume'])
+                ])
         
         return MarketContext(
             symbol=self.symbol,
             timeframe=self.timeframe,
             current_price=current_price,
-            klines=self.klines_history[-50:],  # 最近50根K线
+            klines=klines,
             indicators=indicators,
             ticker=self.current_ticker,
             orderbook=self.current_orderbook,
@@ -437,7 +415,7 @@ class SmartTradingAgent(BaseAgent):
         """构建账户上下文"""
         # 获取余额信息
         try:
-            balance = await self.exchange.ccxt_exchange.fetch_balance()
+            balance = await self.exchange.fetch_balance()
             self.current_balance = balance
         except Exception as e:
             logger.error(f"Error fetching balance: {e}")
@@ -471,136 +449,256 @@ class SmartTradingAgent(BaseAgent):
         return 'USDT'
     
     def _calculate_indicators(self) -> Dict[str, Any]:
-        """计算技术指标"""
+        """获取最新指标值（从DataFrame中读取）"""
         indicators = {}
         
-        if not self.klines_history or len(self.klines_history) < 20:
+        if len(self.df) == 0:
             return indicators
         
-        closes = [k[4] for k in self.klines_history]
-        highs = [k[2] for k in self.klines_history]
-        lows = [k[3] for k in self.klines_history]
-        volumes = [k[5] for k in self.klines_history]
+        last_row = self.df.iloc[-1]
         
-        # RSI
-        if 'rsi' in self.indicators or 'RSI' in self.indicators:
-            indicators['RSI'] = self._calculate_rsi(closes)
+        # 收集所有可用的指标
+        indicator_cols = ['RSI', 'EMA_20', 'EMA_50', 'SMA_20', 'SMA_50', 
+                         'MACD', 'MACD_Signal', 'MACD_Histogram',
+                         'BB_Upper', 'BB_Middle', 'BB_Lower',
+                         'ATR', 'K', 'D', 'ADX', 'Volume', 'AvgVolume_20']
         
-        # EMA
-        if 'ema' in self.indicators or 'EMA' in self.indicators:
-            indicators['EMA_20'] = self._calculate_ema(closes, 20)
-            indicators['EMA_50'] = self._calculate_ema(closes, 50)
-        
-        # MACD
-        if 'macd' in self.indicators or 'MACD' in self.indicators:
-            macd_data = self._calculate_macd(closes)
-            indicators.update(macd_data)
-        
-        # Bollinger Bands
-        if 'bb' in self.indicators or 'BB' in self.indicators:
-            bb_data = self._calculate_bollinger_bands(closes)
-            indicators.update(bb_data)
-        
-        # ATR
-        if 'atr' in self.indicators or 'ATR' in self.indicators:
-            indicators['ATR'] = self._calculate_atr(highs, lows, closes)
-        
-        # 成交量
-        indicators['Volume'] = volumes[-1] if volumes else 0
-        indicators['AvgVolume_20'] = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else 0
+        for col in indicator_cols:
+            if col in self.df.columns:
+                val = last_row[col]
+                if not pd.isna(val):
+                    indicators[col] = float(val)
         
         return indicators
     
-    @staticmethod
-    def _calculate_rsi(closes: List[float], period: int = 14) -> float:
-        """计算RSI"""
-        if len(closes) < period + 1:
-            return 50.0
-        
-        deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
-        gains = [d if d > 0 else 0 for d in deltas[-period:]]
-        losses = [-d if d < 0 else 0 for d in deltas[-period:]]
-        
-        avg_gain = sum(gains) / period
-        avg_loss = sum(losses) / period
-        
-        if avg_loss == 0:
-            return 100.0
-        
-        rs = avg_gain / avg_loss
-        return 100 - (100 / (1 + rs))
     
-    @staticmethod
-    def _calculate_ema(data: List[float], period: int) -> float:
-        """计算EMA"""
-        if len(data) < period:
-            return data[-1] if data else 0
-        
-        multiplier = 2 / (period + 1)
-        ema = sum(data[:period]) / period
-        
-        for price in data[period:]:
-            ema = (price - ema) * multiplier + ema
-        
-        return ema
-    
-    @staticmethod
-    def _calculate_macd(closes: List[float]) -> Dict[str, float]:
-        """计算MACD"""
-        if len(closes) < 26:
-            return {'MACD': 0, 'MACD_Signal': 0, 'MACD_Histogram': 0}
-        
-        ema12 = SmartTradingAgent._calculate_ema(closes, 12)
-        ema26 = SmartTradingAgent._calculate_ema(closes, 26)
-        macd = ema12 - ema26
-        
-        # 简化：使用最近9个MACD值计算信号线
-        signal = macd * 0.8  # 简化处理
-        histogram = macd - signal
-        
-        return {
-            'MACD': macd,
-            'MACD_Signal': signal,
-            'MACD_Histogram': histogram
-        }
-    
-    @staticmethod
-    def _calculate_bollinger_bands(closes: List[float], period: int = 20, std_dev: int = 2) -> Dict[str, float]:
-        """计算布林带"""
-        if len(closes) < period:
-            return {'BB_Upper': 0, 'BB_Middle': 0, 'BB_Lower': 0}
-        
-        recent = closes[-period:]
-        middle = sum(recent) / period
-        
-        variance = sum((x - middle) ** 2 for x in recent) / period
-        std = variance ** 0.5
-        
-        return {
-            'BB_Upper': middle + (std_dev * std),
-            'BB_Middle': middle,
-            'BB_Lower': middle - (std_dev * std)
-        }
-    
-    @staticmethod
-    def _calculate_atr(highs: List[float], lows: List[float], closes: List[float], period: int = 14) -> float:
-        """计算ATR"""
-        if len(closes) < period + 1:
-            return 0.0
-        
-        tr_list = []
-        for i in range(1, len(closes)):
-            tr = max(
-                highs[i] - lows[i],
-                abs(highs[i] - closes[i-1]),
-                abs(lows[i] - closes[i-1])
+    async def _process_klines_batch(self, klines: List[List], is_history: bool = False):
+        """批量处理K线数据（历史加载）"""
+        try:
+            # 构建DataFrame
+            df_new = pd.DataFrame(
+                klines,
+                columns=["timestamp", "open", "high", "low", "close", "volume"]
             )
-            tr_list.append(tr)
+            df_new["timestamp"] = pd.to_datetime(df_new["timestamp"], unit="ms")
+            df_new.set_index("timestamp", inplace=True)
+            
+            if is_history:
+                self.df = df_new.copy()
+            else:
+                self.df = pd.concat([self.df, df_new]).drop_duplicates()
+            
+            # 保持最多max_kline_history行
+            if len(self.df) > self.max_kline_history:
+                self.df = self.df.iloc[-self.max_kline_history:]
+            
+            # 计算所有指标
+            await self._calculate_all_indicators()
+            
+            logger.debug(f"Processed {len(df_new)} klines, total in df: {len(self.df)}")
+        except Exception as e:
+            logger.error(f"Error processing klines batch: {e}", exc_info=True)
+    
+    async def _finalize_last_candle_indicators(self):
+        """对前一条K线进行指标最终化
         
-        if len(tr_list) < period:
-            return 0.0
+        当新K线到达时，使用完整的前一K线数据重新计算其指标
+        确保每条K线有完整且准确的指标数据
+        """
+        try:
+            if len(self.df) < 2:
+                return
+            
+            # 只对前一条进行指标更新，使用完整的历史数据
+            last_idx = self.df.index[-1]
+            
+            # 重新计算所有指标（基于完整历史数据）
+            df = self.df.copy()
+            
+            # === 逐个指标更新前一行 ===
+            # RSI
+            if any(ind.lower() == 'rsi' for ind in self.indicators):
+                rsi = ta.rsi(df['close'], length=14)
+                if rsi is not None and len(rsi) >= 2:
+                    self.df.loc[last_idx, 'RSI'] = rsi.iloc[-2]
+            
+            # EMA
+            if any(ind.lower() == 'ema' for ind in self.indicators):
+                ema20 = ta.ema(df['close'], length=20)
+                ema50 = ta.ema(df['close'], length=50)
+                if ema20 is not None and len(ema20) >= 2:
+                    self.df.loc[last_idx, 'EMA_20'] = ema20.iloc[-2]
+                if ema50 is not None and len(ema50) >= 2:
+                    self.df.loc[last_idx, 'EMA_50'] = ema50.iloc[-2]
+            
+            # MACD
+            if any(ind.lower() == 'macd' for ind in self.indicators):
+                macd_result = ta.macd(df['close'])
+                if macd_result is not None and len(macd_result.columns) >= 3 and len(macd_result) >= 2:
+                    self.df.loc[last_idx, 'MACD'] = macd_result.iloc[-2, 0]
+                    self.df.loc[last_idx, 'MACD_Signal'] = macd_result.iloc[-2, 1]
+                    self.df.loc[last_idx, 'MACD_Histogram'] = macd_result.iloc[-2, 2]
+            
+            logger.debug(f"Finalized indicators for candle {last_idx}")
+        except Exception as e:
+            logger.debug(f"Error finalizing last candle indicators: {e}")
+    
+    async def _process_kline_update(self, kline: List, is_new_candle: bool, current_time: float):
+        """处理单条K线更新（动态更新）
         
-        return sum(tr_list[-period:]) / period
+        分两种情况处理：
+        1. 新K线（新的时间）：保存前一K线指标，添加新K线，触发决策
+        2. K线更新（同一时间更新）：更新当前K线，定时触发决策
+        """
+        try:
+            ts = pd.Timestamp(kline[0], unit="ms")
+            trigger_decision = False
+            
+            if is_new_candle and len(self.df) > 0:
+                # ===== 新K线情况 =====
+                # 1. 对前一条K线进行最终指标计算
+                await self._finalize_last_candle_indicators()
+                
+                # 2. 添加新K线
+                new_row = pd.Series({
+                    'open': kline[1],
+                    'high': kline[2],
+                    'low': kline[3],
+                    'close': kline[4],
+                    'volume': kline[5],
+                }, index=['open', 'high', 'low', 'close', 'volume'])
+                
+                self.df.loc[ts] = new_row
+                
+                # 3. 计算新K线的指标
+                await self._calculate_all_indicators()
+                
+                # 4. 标记应该触发决策
+                self.last_decision_time = current_time
+                trigger_decision = True
+                
+                logger.info(f"New candle at {ts}, triggering decision")
+                
+            else:
+                # ===== K线更新情况 =====
+                # 当前K线还在形成中，仅更新数据
+                if ts not in self.df.index:
+                    new_row = pd.Series({
+                        'open': kline[1],
+                        'high': kline[2],
+                        'low': kline[3],
+                        'close': kline[4],
+                        'volume': kline[5],
+                    }, index=['open', 'high', 'low', 'close', 'volume'])
+                    self.df.loc[ts] = new_row
+                else:
+                    # 更新现有行
+                    self.df.loc[ts, 'open'] = kline[1]
+                    self.df.loc[ts, 'high'] = kline[2]
+                    self.df.loc[ts, 'low'] = kline[3]
+                    self.df.loc[ts, 'close'] = kline[4]
+                    self.df.loc[ts, 'volume'] = kline[5]
+                
+                # 计算最新指标（仅更新最后一行，提高性能）
+                await self._calculate_all_indicators()
+                
+                # 定时触发决策（每5秒检查一次）
+                if current_time - self.last_decision_time >= self.min_decision_interval:
+                    self.last_decision_time = current_time
+                    trigger_decision = True
+                    logger.debug(f"Time-based decision trigger at {ts}")
+            
+            # 保持历史数据容量
+            if len(self.df) > self.max_kline_history:
+                self.df = self.df.iloc[-self.max_kline_history:]
+            
+            # 触发决策（如果条件满足）
+            if trigger_decision:
+                # 在后台执行，不阻塞数据更新
+                asyncio.create_task(self._make_decision())
+                
+        except Exception as e:
+            logger.error(f"Error processing kline update: {e}", exc_info=True)
+    
+    async def _calculate_all_indicators(self):
+        """计算所有技术指标"""
+        try:
+            if len(self.df) < 20:
+                return
+            
+            df = self.df.copy()
+            
+            # === 基础指标 ===
+            # RSI
+            if any(ind.lower() == 'rsi' for ind in self.indicators):
+                rsi = ta.rsi(df['close'], length=14)
+                if rsi is not None and len(rsi) > 0:
+                    self.df['RSI'] = rsi
+            
+            # EMA
+            if any(ind.lower() == 'ema' for ind in self.indicators):
+                ema20 = ta.ema(df['close'], length=20)
+                ema50 = ta.ema(df['close'], length=50)
+                if ema20 is not None:
+                    self.df['EMA_20'] = ema20
+                if ema50 is not None:
+                    self.df['EMA_50'] = ema50
+            
+            # SMA
+            if any(ind.lower() == 'sma' for ind in self.indicators):
+                sma20 = ta.sma(df['close'], length=20)
+                sma50 = ta.sma(df['close'], length=50)
+                if sma20 is not None:
+                    self.df['SMA_20'] = sma20
+                if sma50 is not None:
+                    self.df['SMA_50'] = sma50
+            
+            # MACD
+            if any(ind.lower() == 'macd' for ind in self.indicators):
+                macd_result = ta.macd(df['close'])
+                if macd_result is not None and len(macd_result.columns) >= 3:
+                    self.df['MACD'] = macd_result.iloc[:, 0]
+                    self.df['MACD_Signal'] = macd_result.iloc[:, 1]
+                    self.df['MACD_Histogram'] = macd_result.iloc[:, 2]
+            
+            # Bollinger Bands
+            if any(ind.lower() == 'bb' for ind in self.indicators):
+                bb_result = ta.bbands(df['close'], length=20, std=2)
+                if bb_result is not None and len(bb_result.columns) >= 3:
+                    self.df['BB_Upper'] = bb_result.iloc[:, 0]
+                    self.df['BB_Middle'] = bb_result.iloc[:, 1]
+                    self.df['BB_Lower'] = bb_result.iloc[:, 2]
+            
+            # ATR
+            if any(ind.lower() == 'atr' for ind in self.indicators):
+                atr = ta.atr(df['high'], df['low'], df['close'], length=14)
+                if atr is not None:
+                    self.df['ATR'] = atr
+            
+            # KDJ / Stochastic
+            if any(ind.lower() in ['kdj', 'stoch'] for ind in self.indicators):
+                stoch_result = ta.stoch(df['high'], df['low'], df['close'], k=14, d=3)
+                if stoch_result is not None and len(stoch_result.columns) >= 2:
+                    self.df['K'] = stoch_result.iloc[:, 0]
+                    self.df['D'] = stoch_result.iloc[:, 1]
+            
+            # ADX
+            if any(ind.lower() == 'adx' for ind in self.indicators):
+                try:
+                    adx_result = ta.adx(df['high'], df['low'], df['close'], length=14)
+                    adx_col = next((c for c in adx_result.columns if 'ADX' in c.upper()), None)
+                    if adx_col:
+                        self.df['ADX'] = adx_result[adx_col]
+                except Exception:
+                    pass
+            
+            # 成交量指标
+            self.df['Volume'] = df['volume']
+            self.df['AvgVolume_20'] = df['volume'].rolling(window=20).mean()
+            
+            logger.debug(f"Indicators calculated for {len(self.df)} rows")
+        except Exception as e:
+            logger.error(f"Error calculating indicators: {e}", exc_info=True)
     
     def _build_llm_prompt(
         self,
@@ -703,5 +801,5 @@ class SmartTradingAgent(BaseAgent):
             'indicators': self.indicators,
             'current_price': self.current_ticker.get('last') if self.current_ticker else None,
             'positions': self.current_positions,
-            'klines_count': len(self.klines_history),
+            'klines_count': len(self.df),
         }

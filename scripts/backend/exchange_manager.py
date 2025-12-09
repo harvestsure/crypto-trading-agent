@@ -4,7 +4,6 @@
 import asyncio
 import importlib
 import logging
-import ccxt.pro as ccxtpro
 from typing import Dict, Any, List, Set, Optional, Callable
 from exchanges.base_exchange import BaseExchange
 from shared_state import SharedState
@@ -39,7 +38,7 @@ class ExchangeManager:
                 'id': 'ex_xxx',
                 'exchange': 'binance',  # 交易所类型
                 'api_key': '...',
-                'secret_key': '...',
+                'secret': '...',
                 'passphrase': '...',  # 可选，OKX等需要
                 'testnet': True
             }, ...]
@@ -58,7 +57,7 @@ class ExchangeManager:
         添加单个交易所
         
         Args:
-            config: 交易所配置字典，包含 id, exchange, api_key, secret_key, passphrase (可选), testnet
+            config: 交易所配置字典，包含 id, exchange, api_key, secret, passphrase (可选), testnet
         
         Returns:
             是否成功添加
@@ -108,13 +107,30 @@ class ExchangeManager:
             module = importlib.import_module(module_name)
             ExchangeClass = getattr(module, class_name)
             
+            # Normalize api_keys: support both new format (api_keys dict) and legacy format (separate fields)
+            api_keys = config.get('api_keys', {})
+            if not api_keys:
+                api_keys = {
+                    'api_key': config.get('api_key'),
+                    'secret': config.get('secret'),
+                    'passphrase': config.get('passphrase')
+                }
+            else:
+                # If api_keys is new format, convert to ccxt format
+                # ccxt 期望: api_key, secret (not api_secret), passphrase
+                if isinstance(api_keys, dict):
+                    api_keys = {
+                        'api_key': api_keys.get('api_key'),
+                        'secret': api_keys.get('secret'), 
+                        'passphrase': api_keys.get('passphrase')
+                    }
+            
+            # Remove None values
+            api_keys = {k: v for k, v in api_keys.items() if v is not None}
+            
             exchange_instance = ExchangeClass(
                 exchange_id=exchange_id,
-                api_keys={
-                    'api_key': config.get('api_key'),
-                    'api_secret': config.get('secret_key'),
-                    'passphrase': config.get('passphrase')
-                },
+                api_keys=api_keys,
                 config={'testnet': config.get('testnet', False)},
                 shared_state=self.shared_state
             )
@@ -133,42 +149,76 @@ class ExchangeManager:
         except Exception as e:
             logging.debug(f"加载自定义交易所失败: {e}")
             return None
+        
+    async def _handle_data_event(self, event: DataEvent):
+        """统一数据事件处理器"""
+        try:
+            # 将事件转发给策略管理器
+            if self.data_event_handler:
+                await self.data_event_handler(event)
+        except Exception as e:
+            logging.error(f"处理数据事件失败: {e}", exc_info=False)
     
     async def _create_ccxt_exchange(self, exchange_type: str, config: Dict[str, Any]) -> Optional[Any]:
         """
-        使用 ccxt.pro 创建交易所实例
+        使用自定义交易所实现创建交易所实例
+        优先使用 BinanceExchange、OkxExchange 等自定义实现
         """
         try:
-            ExchangeClass = getattr(ccxtpro, exchange_type, None)
-            if not ExchangeClass:
-                logging.error(f"ccxt.pro 不支持交易所: {exchange_type}")
-                return None
+            exchange_id = config.get('id')
             
-            exchange_config = {
-                'apiKey': config.get('api_key', ''),
-                'secret': config.get('secret_key', ''),
-                'enableRateLimit': True,
-            }
+            # 尝试加载自定义交易所实现
+            module_name = f"exchanges.exchange_{exchange_type}"
+            class_name = f"{exchange_type.capitalize()}Exchange"
             
-            if config.get('passphrase'):
-                exchange_config['password'] = config.get('passphrase')
-            
-            exchange = ExchangeClass(exchange_config)
-            exchange.aiohttp_trust_env = True
-            exchange.options['defaultType'] = 'swap'
+            logging.debug(f"尝试加载自定义交易所: {module_name}.{class_name}")
+            module = importlib.import_module(module_name)
+            ExchangeClass = getattr(module, class_name)
 
-            if config.get('testnet'):
-                if hasattr(exchange, 'enable_demo_trading') and exchange_type == 'binance':
-                    exchange.enable_demo_trading(True)
-                else:
-                    exchange.set_sandbox_mode(True)
+            # Normalize api_keys: support both new format (api_keys dict) and legacy format (separate fields)
+            api_keys = config.get('api_keys', {})
+            if not api_keys:
+                api_keys = {
+                    'api_key': config.get('api_key'),
+                    'secret': config.get('secret'), 
+                    'passphrase': config.get('passphrase')
+                }
+            else:
+                # If api_keys is new format, convert to ccxt format
+                # ccxt 期望: api_key, secret (not secret), passphrase
+                if isinstance(api_keys, dict):
+                    api_keys = {
+                        'api_key': api_keys.get('api_key'),
+                        'secret': api_keys.get('secret'),
+                        'passphrase': api_keys.get('passphrase')
+                    }
             
-            await exchange.load_time_difference()
-            await exchange.load_markets()
+            # Remove None values
+            api_keys = {k: v for k, v in api_keys.items() if v is not None}
             
-            return exchange
+            # 创建自定义交易所实例
+            exchange_instance = ExchangeClass(
+                exchange_id=exchange_id,
+                api_keys=api_keys,
+                config=config
+            )
+            
+            # 设置事件处理器（如果该实例支持）
+            if hasattr(exchange_instance, 'set_data_event_handler'):
+                exchange_instance.set_data_event_handler(self._handle_data_event)
+            
+            # 初始化交易所连接
+            if hasattr(exchange_instance, 'initialize'):
+                await exchange_instance.initialize()
+            
+            logging.info(f"✅ 已创建自定义交易所实例: {exchange_id} ({exchange_type})")
+            return exchange_instance
+            
+        except (ImportError, AttributeError) as e:
+            logging.debug(f"自定义交易所实现不存在或加载失败: {e}")
+            return None
         except Exception as e:
-            logging.error(f"创建 {exchange_type} 交易所失败: {e}", exc_info=True)
+            logging.error(f"创建交易所实例失败: {e}", exc_info=True)
             return None
     
     

@@ -74,11 +74,6 @@ class BaseExchange(ABC):
     async def set_position_mode(self, hedge_mode: bool):
         """设置持仓模式"""
         pass
-    
-    @abstractmethod
-    async def fetch_dynamic_symbols(self) -> List[str]:
-        """获取动态交易对列表"""
-        pass
 
     @abstractmethod
     async def fetch_ohlcv(self, symbol: str, timeframe='1m', since: Optional[int] = None, limit: Optional[int] = None, params={}) -> List[list]:
@@ -281,6 +276,11 @@ class BaseExchange(ABC):
     @abstractmethod
     async def fetch_positions(self, symbols: Optional[List[str]] = None, params={}) -> List[Dict]:
         """获取持仓信息"""
+        pass
+
+    @abstractmethod
+    async def fetch_balance(self, params: Dict = {}) -> Dict:
+        """获取账户余额信息"""
         pass
         
     # === 状态查询方法 ===

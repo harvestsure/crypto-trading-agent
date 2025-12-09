@@ -24,11 +24,15 @@ interface CreateModelModalProps {
 }
 
 const providers = [
-  { value: "openai", label: "OpenAI", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"] },
-  { value: "anthropic", label: "Anthropic", models: ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"] },
-  { value: "deepseek", label: "DeepSeek", models: ["deepseek-chat", "deepseek-reasoner"] },
-  { value: "custom", label: "Custom", models: [] },
+  { value: "openai", label: "OpenAI", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"], baseUrl: "https://api.openai.com/v1" },
+  { value: "anthropic", label: "Anthropic", models: ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229"], baseUrl: undefined },
+  { value: "deepseek", label: "DeepSeek", models: ["deepseek-chat", "deepseek-reasoner"], baseUrl: "https://api.deepseek.com" },
+  { value: "custom", label: "Custom", models: [], baseUrl: undefined },
 ]
+
+const getDefaultBaseUrl = (provider: string): string => {
+  return providers.find((p) => p.value === provider)?.baseUrl || ""
+}
 
 export function CreateModelModal({ open, onOpenChange, onSuccess }: CreateModelModalProps) {
   const { createModel, isCreatingModel } = useAppStore()
@@ -47,11 +51,14 @@ export function CreateModelModal({ open, onOpenChange, onSuccess }: CreateModelM
     e.preventDefault()
     setError(null)
 
+    // 获取默认 base_url（如果用户没有指定）
+    const baseUrl = formData.baseUrl || getDefaultBaseUrl(formData.provider)
+
     const result = await createModel({
       name: formData.name,
       provider: formData.provider,
       apiKey: formData.apiKey,
-      baseUrl: formData.baseUrl || undefined,
+      baseUrl: baseUrl || undefined,
       model: formData.model,
     })
 
@@ -91,13 +98,15 @@ export function CreateModelModal({ open, onOpenChange, onSuccess }: CreateModelM
               <Label htmlFor="provider">Provider</Label>
               <Select
                 value={formData.provider}
-                onValueChange={(value: "openai" | "anthropic" | "deepseek" | "custom") =>
+                onValueChange={(value: "openai" | "anthropic" | "deepseek" | "custom") => {
+                  const defaultBaseUrl = getDefaultBaseUrl(value)
                   setFormData({
                     ...formData,
                     provider: value,
                     model: providers.find((p) => p.value === value)?.models[0] || "",
+                    baseUrl: defaultBaseUrl,
                   })
-                }
+                }}
                 disabled={isCreatingModel}
               >
                 <SelectTrigger>
@@ -157,18 +166,19 @@ export function CreateModelModal({ open, onOpenChange, onSuccess }: CreateModelM
               />
             </div>
 
-            {formData.provider === "custom" && (
-              <div className="grid gap-2">
-                <Label htmlFor="baseUrl">Base URL</Label>
-                <Input
-                  id="baseUrl"
-                  placeholder="https://api.example.com/v1"
-                  value={formData.baseUrl}
-                  onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
-                  disabled={isCreatingModel}
-                />
-              </div>
-            )}
+            <div className="grid gap-2">
+              <Label htmlFor="baseUrl">Base URL {formData.provider !== "custom" && "(Optional)"}</Label>
+              <Input
+                id="baseUrl"
+                placeholder={getDefaultBaseUrl(formData.provider) || "https://api.example.com/v1"}
+                value={formData.baseUrl}
+                onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+                disabled={isCreatingModel}
+              />
+              {formData.provider !== "custom" && formData.baseUrl === getDefaultBaseUrl(formData.provider) && (
+                <p className="text-xs text-muted-foreground">Using default endpoint for {formData.provider}</p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isCreatingModel}>

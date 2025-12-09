@@ -10,6 +10,7 @@ from datetime import datetime
 
 from agents.smart_trading_agent import SmartTradingAgent
 from models.llm_model import LLMModel
+from common.data_types import DataEvent, DataEventType
 from tools.tool_registry import ToolRegistry
 from tools.trading_tools import create_trading_tools
 from exchanges.common_exchange import CommonExchange
@@ -79,10 +80,11 @@ class AgentManager:
             
             # 3. 创建 LLM 模型实例
             llm_model = LLMModel(
-                model_name=model_config['model'],
                 api_key=model_config['api_key'],
+                model=model_config['model'],
                 base_url=model_config.get('base_url'),
-                provider=model_config['provider']
+                provider=model_config.get('provider', 'openai'),
+                temperature=0.7,
             )
             
             # 4. 创建工具注册表
@@ -152,8 +154,7 @@ class AgentManager:
             
             # 更新数据库状态
             AgentRepository.update(agent_id, {
-                'status': 'running',
-                'started_at': datetime.utcnow().isoformat()
+                'status': 'running'
             })
             
             logger.info(f"✅ Agent {agent.name} ({agent_id}) started")
@@ -326,3 +327,46 @@ class AgentManager:
         self.agents.clear()
         self.agent_tasks.clear()
         logger.info("AgentManager cleaned up")
+
+    # === 统一数据事件处理接口 ===
+    
+    async def handle_data_event(self, event: DataEvent):
+        """
+        处理数据事件并分发到相应的策略实例
+        
+        Args:
+            event: 数据事件对象
+        """
+        try:
+            exchange_id = event.exchange_id
+            symbol = event.symbol
+            
+            # 处理持仓事件
+            if event.event_type == DataEventType.POSITION:
+                if self.position_manager:
+                    await self.position_manager.update_position_from_event(
+                        exchange_id, symbol, event.data
+                    )
+            
+            # 处理订单事件 (可选：同步订单状态到 order_manager)
+            elif event.event_type == DataEventType.ORDER:
+                # 这里可以添加订单状态同步逻辑
+                pass
+            
+            tasks = []
+            # 对于全局事件（如余额），分发到该交易所的所有策略
+            if not symbol or event.event_type in [DataEventType.BALANCE, DataEventType.CONNECTION_STATUS]:
+                for agent in self.agents.values():
+                    if agent.exchange.exchange_id == exchange_id:
+                        tasks.append(asyncio.create_task(agent.on_data_event(event)))
+            else:
+                # 分发到特定的策略实例
+                for agent in self.agents.values():
+                    if agent.exchange.exchange_id == exchange_id and agent.symbol == symbol:
+                        tasks.append(asyncio.create_task(agent.on_data_event(event)))
+                                                    
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+                    
+        except Exception as e:
+            logging.error(f"处理数据事件失败: {e}", exc_info=False)

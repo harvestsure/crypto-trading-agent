@@ -8,7 +8,6 @@ Requirements:
 
 import asyncio
 import json
-import logging
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
@@ -18,6 +17,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from logger_config import init_logging, get_logger
+from ai_model_config import get_or_set_base_url
 from database import (
     init_database,
     AIModelRepository,
@@ -35,9 +36,9 @@ from exchange_manager import ExchangeManager
 from agent_manager import AgentManager
 from routes.agent_conversation_routes import router as conversation_router
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Initialize logging
+init_logging()
+logger = get_logger(__name__)
 
 
 # ============== Pydantic Models ==============
@@ -55,8 +56,10 @@ class ExchangeConfig(BaseModel):
     id: Optional[str] = None
     name: str
     exchange: str
-    api_key: str
-    secret_key: str
+    # Support both new format (api_keys as dict) and legacy format (separate fields)
+    api_keys: Optional[Dict[str, str]] = None
+    api_key: Optional[str] = None
+    secret: Optional[str] = None
     passphrase: Optional[str] = None
     testnet: bool = True
 
@@ -271,40 +274,126 @@ async def lifespan(app: FastAPI):
     init_database()
     logger.info("Database initialized")
     
-    # 从数据库加载所有启用的交易所
+    # ============ Step 1: 加载和初始化交易所 ============
     try:
         enabled_exchanges = ExchangeRepository.get_all()
         if enabled_exchanges:
-            logging.info(f"从数据库加载 {len(enabled_exchanges)} 个交易所配置")
+            logger.info(f"从数据库加载 {len(enabled_exchanges)} 个交易所配置")
             for ex in enabled_exchanges:
                 success = await exchange_manager.add_exchange({
                     'id': ex['id'],
                     'exchange': ex['exchange'],
-                    'api_key': ex['api_key'],
-                    'secret_key': ex['secret_key'],
-                    'passphrase': ex.get('passphrase'),
+                    'api_keys': ex.get('api_keys', {}),
                     'testnet': ex.get('testnet', True)
                 })
                 
                 # 更新数据库中的状态
                 if success:
                     ExchangeRepository.update(ex['id'], {'status': 'connected'})
-                    logging.info(f"✅ 启动时连接交易所: {ex['name']}")
+                    logger.info(f"✅ 启动时连接交易所: {ex['name']}")
                 else:
                     ExchangeRepository.update(ex['id'], {'status': 'error'})
-                    logging.warning(f"❌ 启动时连接交易所失败: {ex['name']}")
+                    logger.warning(f"❌ 启动时连接交易所失败: {ex['name']}")
+        else:
+            logger.info("未配置任何交易所")
     except Exception as e:
         logger.error(f"初始化交易所失败: {e}")
     
-    # 初始化 AgentManager
-    agent_manager = AgentManager(exchange_manager)
-    logger.info("AgentManager initialized")
+    # ============ Step 2: 加载和初始化模型 ============
+    try:
+        enabled_models = AIModelRepository.get_all()
+        if enabled_models:
+            logger.info(f"从数据库加载 {len(enabled_models)} 个AI模型配置")
+            active_models = [m for m in enabled_models if m.get('status') == 'active']
+            logger.info(f"其中 {len(active_models)} 个模型处于活跃状态")
+        else:
+            logger.info("未配置任何AI模型")
+    except Exception as e:
+        logger.error(f"加载AI模型失败: {e}")
+    
+    # ============ Step 3: 初始化 AgentManager ============
+    try:
+        agent_manager = AgentManager(exchange_manager)
+        exchange_manager.set_data_event_handler(agent_manager.handle_data_event)
+        logger.info("✅ AgentManager 已初始化")
+    except Exception as e:
+        logger.error(f"初始化 AgentManager 失败: {e}")
+        agent_manager = None
+    
+    # ============ Step 4: 加载和启动Agents ============
+    if agent_manager:
+        try:
+            enabled_agents = AgentRepository.get_all()
+            stopped_agents = [a for a in enabled_agents if a.get('status') == 'stopped']
+            running_agents = [a for a in enabled_agents if a.get('status') == 'running']
+            
+            if enabled_agents:
+                logger.info(f"从数据库加载 {len(enabled_agents)} 个Agent ({len(running_agents)} 个需要启动)")
+            else:
+                logger.info("未配置任何Agent")
+                enabled_agents = []
+            
+            # 先创建所有 Agent 实例
+            created_agents = []
+            for agent in enabled_agents:
+                try:
+                    logger.info(f"正在创建 Agent: {agent['name']} (ID: {agent['id']})")
+                    
+                    agent_config = {
+                        'max_position_size': agent.get('max_position_size', 1000.0),
+                        'risk_per_trade': agent.get('risk_per_trade', 0.02),
+                        'default_leverage': agent.get('default_leverage', 1),
+                        'decision_interval': 60
+                    }
+                    
+                    await agent_manager.create_agent(
+                        agent_id=agent['id'],
+                        name=agent['name'],
+                        model_id=agent['model_id'],
+                        exchange_id=agent['exchange_id'],
+                        symbol=agent['symbol'],
+                        timeframe=agent['timeframe'],
+                        indicators=agent['indicators'],
+                        prompt=agent['prompt'],
+                        config=agent_config
+                    )
+                    created_agents.append(agent['id'])
+                    logger.info(f"✅ 成功创建 Agent: {agent['name']}")
+                except Exception as e:
+                    logger.error(f"❌ 创建 Agent {agent['name']} (ID: {agent['id']}) 失败: {e}", exc_info=True)
+                    AgentRepository.update(agent['id'], {'status': 'error'})
+            
+            logger.info(f"成功创建 {len(created_agents)} 个Agent")
+            
+            # 然后启动之前运行中的 agents
+            started_agents = []
+            for agent in running_agents:
+                try:
+                    if agent['id'] not in created_agents:
+                        logger.warning(f"Agent {agent['name']} 创建失败，跳过启动")
+                        continue
+                    
+                    logger.info(f"正在启动 Agent: {agent['name']} (ID: {agent['id']})")
+                    await agent_manager.start_agent(agent['id'])
+                    started_agents.append(agent['id'])
+                    logger.info(f"✅ 成功启动 Agent: {agent['name']}")
+                except Exception as e:
+                    logger.error(f"❌ 启动 Agent {agent['name']} (ID: {agent['id']}) 失败: {e}", exc_info=True)
+                    AgentRepository.update(agent['id'], {'status': 'error'})
+            
+            logger.info(f"成功启动 {len(started_agents)} 个Agent")
+        except Exception as e:
+            logger.error(f"加载Agents失败: {e}", exc_info=True)
     
     ActivityLogRepository.log('info', 'Backend server started')
+    logger.info("=" * 50)
+    logger.info("✅ 后端服务启动完成")
+    logger.info("=" * 50)
     
     yield
     
     # Cleanup
+    logger.info("开始清理资源...")
     if agent_manager:
         await agent_manager.cleanup()
     
@@ -354,12 +443,16 @@ async def get_models():
 @app.post("/api/models")
 async def create_model(config: AIModelConfig):
     model_id = config.id or f"model_{uuid.uuid4().hex[:8]}"
+    
+    # Use provided base_url or get default for the provider
+    base_url = get_or_set_base_url(config.provider, config.base_url)
+    
     model_data = {
         'id': model_id,
         'name': config.name,
         'provider': config.provider,
         'api_key': config.api_key,
-        'base_url': config.base_url,
+        'base_url': base_url,
         'model': config.model,
         'status': 'active'
     }
@@ -406,15 +499,70 @@ async def update_model(model_id: str, data: dict):
     return updated
 
 
+@app.post("/api/models/{model_id}/test-connection")
+async def test_model_connection(model_id: str):
+    """测试 LLM 模型连接是否正确"""
+    from models.llm_model import LLMModel
+    
+    model_config = AIModelRepository.get_by_id(model_id)
+    if not model_config:
+        raise HTTPException(status_code=404, detail="Model not found")
+    
+    try:
+        # 创建模型实例
+        llm_model = LLMModel(
+            api_key=model_config['api_key'],
+            model=model_config['model'],
+            base_url=model_config.get('base_url'),
+            provider=model_config.get('provider', 'openai'),
+        )
+        
+        # 创建对话
+        llm_model.create_conversation("You are a helpful assistant.")
+        
+        # 测试 API 连接
+        response = llm_model.chat_completion("Hello, please respond with a single word.")
+        
+        return {
+            "success": True,
+            "message": "Connection successful",
+            "config": llm_model.get_config_info(),
+            "response": response.get("content", ""),
+        }
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Model connection test failed: {error_msg}")
+        return {
+            "success": False,
+            "message": "Connection failed",
+            "error": error_msg,
+            "config": {
+                "provider": model_config.get('provider', 'openai'),
+                "model": model_config['model'],
+                "base_url": model_config.get('base_url') or "default",
+            }
+        }
+
+
 # ============== Exchanges API ==============
 
 @app.get("/api/exchanges")
 async def get_exchanges():
     exchanges = ExchangeRepository.get_all()
-    # Mask keys
+    # Mask sensitive keys in api_keys
     for ex in exchanges:
-        ex['api_key'] = '***' + ex['api_key'][-4:] if ex.get('api_key') else ''
-        ex['secret_key'] = '***' + ex['secret_key'][-4:] if ex.get('secret_key') else ''
+        if ex.get('api_keys') and isinstance(ex['api_keys'], dict):
+            api_keys = ex['api_keys'].copy()
+            # Mask api_key
+            if api_keys.get('api_key'):
+                api_keys['api_key'] = '***' + api_keys['api_key'][-4:]
+            # Mask secret
+            if api_keys.get('secret'):
+                api_keys['secret'] = '***' + api_keys['secret'][-4:]
+            # Mask passphrase
+            if api_keys.get('passphrase'):
+                api_keys['passphrase'] = '***' + api_keys['passphrase'][-4:] if api_keys['passphrase'] else ''
+            ex['api_keys'] = api_keys
     return exchanges
 
 
@@ -442,14 +590,25 @@ async def get_exchange_status(exchange_id: str):
 async def create_exchange(config: ExchangeConfig):
     exchange_id = config.id or f"ex_{uuid.uuid4().hex[:8]}"
     
+    # Normalize api_keys: support both new format (api_keys dict) and legacy format (separate fields)
+    if config.api_keys:
+        api_keys = config.api_keys
+    else:
+        api_keys = {
+            'api_key': config.api_key or '',
+            'secret': config.secret or '',
+            'passphrase': config.passphrase or ''
+        }
+    
+    # Remove empty values
+    api_keys = {k: v for k, v in api_keys.items() if v}
+    
     # 保存到数据库
     exchange_data = {
         'id': exchange_id,
         'name': config.name,
         'exchange': config.exchange,
-        'api_key': config.api_key,
-        'secret_key': config.secret_key,
-        'passphrase': config.passphrase,
+        'api_keys': api_keys,
         'testnet': config.testnet,
         'status': 'disconnected'
     }
@@ -460,9 +619,7 @@ async def create_exchange(config: ExchangeConfig):
         success = await exchange_manager.add_exchange({
             'id': exchange_id,
             'exchange': config.exchange,
-            'api_key': config.api_key,
-            'secret_key': config.secret_key,
-            'passphrase': config.passphrase,
+            'api_keys': api_keys,
             'testnet': config.testnet
         })
         
@@ -490,13 +647,24 @@ async def update_exchange(exchange_id: str, config: ExchangeConfig):
     if not existing:
         raise HTTPException(status_code=404, detail="Exchange not found")
     
+    # Normalize api_keys: support both new format (api_keys dict) and legacy format (separate fields)
+    if config.api_keys:
+        api_keys = config.api_keys
+    else:
+        api_keys = {
+            'api_key': config.api_key or '',
+            'secret': config.secret or '',
+            'passphrase': config.passphrase or ''
+        }
+    
+    # Remove empty values
+    api_keys = {k: v for k, v in api_keys.items() if v}
+    
     # 更新数据库
     update_data = {
         'name': config.name,
         'exchange': config.exchange,
-        'api_key': config.api_key,
-        'secret_key': config.secret_key,
-        'passphrase': config.passphrase,
+        'api_keys': api_keys,
         'testnet': config.testnet,
         'status': 'disconnected'
     }
@@ -507,9 +675,7 @@ async def update_exchange(exchange_id: str, config: ExchangeConfig):
         success = await exchange_manager.update_exchange(exchange_id, {
             'id': exchange_id,
             'exchange': config.exchange,
-            'api_key': config.api_key,
-            'secret_key': config.secret_key,
-            'passphrase': config.passphrase,
+            'api_keys': api_keys,
             'testnet': config.testnet
         })
         
@@ -541,9 +707,7 @@ async def connect_exchange(exchange_id: str):
         success = await exchange_manager.add_exchange({
             'id': exchange_id,
             'exchange': config['exchange'],
-            'api_key': config['api_key'],
-            'secret_key': config['secret_key'],
-            'passphrase': config.get('passphrase'),
+            'api_keys': config.get('api_keys', {}),
             'testnet': config.get('testnet', True)
         })
         

@@ -150,13 +150,14 @@ class ConversationHistory:
 
 
 class LLMModel:
-    """LLM 模型包装类"""
+    """LLM 模型包装类 - 支持多个 LLM 提供商"""
     
     def __init__(
         self,
         api_key: str,
         model: str = "gpt-4o-mini",
         base_url: Optional[str] = None,
+        provider: str = "openai",
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
     ):
@@ -164,22 +165,38 @@ class LLMModel:
         初始化 LLM 模型
         
         Args:
-            api_key: OpenAI API Key
+            api_key: API Key
             model: 模型名称
-            base_url: 自定义 API 端点（支持兼容 OpenAI 的服务）
+            base_url: 自定义 API 端点（支持兼容 OpenAI 的服务，如 DeepSeek）
+            provider: 提供商名称 ('openai', 'deepseek', 等)
             temperature: 温度参数
             max_tokens: 最大输出 token 数
         """
+        self.api_key = api_key
         self.model = model
+        self.base_url = base_url
+        self.provider = provider
         self.temperature = temperature
         self.max_tokens = max_tokens
         
         # 初始化同步和异步客户端
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
-        self.async_client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        client_kwargs = {
+            "api_key": api_key,
+        }
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        
+        self.client = OpenAI(**client_kwargs)
+        self.async_client = AsyncOpenAI(**client_kwargs)
         
         self.token_counter = TokenCounter(model)
         self.conversation = None
+        
+        # 记录配置信息
+        logger.info(
+            f"LLMModel initialized - Provider: {provider}, Model: {model}, "
+            f"Base URL: {base_url or 'default'}"
+        )
     
     def create_conversation(self, system_prompt: str) -> ConversationHistory:
         """创建新的对话"""
@@ -363,4 +380,14 @@ class LLMModel:
             "model": self.model,
             "messages": self.conversation.get_messages_for_api(),
             "stats": self.conversation.get_stats(),
+        }
+    
+    def get_config_info(self) -> Dict[str, Any]:
+        """获取当前模型配置信息（用于调试）"""
+        return {
+            "provider": self.provider,
+            "model": self.model,
+            "base_url": self.base_url or "default",
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
         }

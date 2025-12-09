@@ -13,6 +13,11 @@ import os
 DATABASE_PATH = os.environ.get("DATABASE_PATH", "crypto_agent.db")
 
 
+def _clean_api_keys(api_keys: Dict[str, str]) -> Dict[str, str]:
+    """Remove empty string values from api_keys dict to save space"""
+    return {k: v for k, v in api_keys.items() if v}
+
+
 @contextmanager
 def get_db():
     """Context manager for database connections"""
@@ -53,9 +58,7 @@ def init_database():
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 exchange TEXT NOT NULL,
-                api_key TEXT NOT NULL,
-                secret_key TEXT NOT NULL,
-                passphrase TEXT,
+                api_keys TEXT NOT NULL,
                 testnet BOOLEAN DEFAULT TRUE,
                 status TEXT DEFAULT 'disconnected',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -78,6 +81,7 @@ def init_database():
                 default_leverage INTEGER DEFAULT 1,
                 status TEXT DEFAULT 'stopped',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                stopped_at TIMESTAMP,
                 FOREIGN KEY (model_id) REFERENCES ai_models(id),
                 FOREIGN KEY (exchange_id) REFERENCES exchanges(id)
             )
@@ -267,16 +271,28 @@ class ExchangeRepository:
     def create(exchange_data: Dict[str, Any]) -> Dict[str, Any]:
         with get_db() as conn:
             cursor = conn.cursor()
+            # Normalize api_keys: if separate fields provided, merge them; if api_keys provided, use it
+            api_keys = exchange_data.get('api_keys')
+            if not api_keys:
+                # Support backward compatibility: merge api_key, secret, passphrase
+                api_keys = {
+                    'api_key': exchange_data.get('api_key', ''),
+                    'secret': exchange_data.get('secret', ''),
+                    'passphrase': exchange_data.get('passphrase', '')
+                }
+            
+            # Clean empty values
+            api_keys = _clean_api_keys(api_keys)
+            api_keys_json = json.dumps(api_keys)
+            
             cursor.execute("""
-                INSERT INTO exchanges (id, name, exchange, api_key, secret_key, passphrase, testnet, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO exchanges (id, name, exchange, api_keys, testnet, status)
+                VALUES (?, ?, ?, ?, ?, ?)
             """, (
                 exchange_data['id'],
                 exchange_data['name'],
                 exchange_data['exchange'],
-                exchange_data['api_key'],
-                exchange_data['secret_key'],
-                exchange_data.get('passphrase'),
+                api_keys_json,
                 exchange_data.get('testnet', True),
                 exchange_data.get('status', 'disconnected')
             ))
@@ -288,14 +304,33 @@ class ExchangeRepository:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM exchanges WHERE id = ?", (exchange_id,))
             row = cursor.fetchone()
-            return dict(row) if row else None
+            if row:
+                result = dict(row)
+                # Parse api_keys JSON string to dict for easier access
+                if result.get('api_keys'):
+                    try:
+                        result['api_keys'] = json.loads(result['api_keys'])
+                    except (json.JSONDecodeError, TypeError):
+                        result['api_keys'] = {}
+                return result
+            return None
     
     @staticmethod
     def get_all() -> List[Dict[str, Any]]:
         with get_db() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT * FROM exchanges ORDER BY created_at DESC")
-            return [dict(row) for row in cursor.fetchall()]
+            results = []
+            for row in cursor.fetchall():
+                result = dict(row)
+                # Parse api_keys JSON string to dict
+                if result.get('api_keys'):
+                    try:
+                        result['api_keys'] = json.loads(result['api_keys'])
+                    except (json.JSONDecodeError, TypeError):
+                        result['api_keys'] = {}
+                results.append(result)
+            return results
     
     @staticmethod
     def update(exchange_id: str, data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -305,8 +340,14 @@ class ExchangeRepository:
             values = []
             for key, value in data.items():
                 if key != 'id':
-                    fields.append(f"{key} = ?")
-                    values.append(value)
+                    if key == 'api_keys' and isinstance(value, dict):
+                        # Clean empty values and serialize
+                        cleaned_keys = _clean_api_keys(value)
+                        fields.append(f"{key} = ?")
+                        values.append(json.dumps(cleaned_keys))
+                    else:
+                        fields.append(f"{key} = ?")
+                        values.append(value)
             values.append(exchange_id)
             cursor.execute(f"UPDATE exchanges SET {', '.join(fields)} WHERE id = ?", values)
             return ExchangeRepository.get_by_id(exchange_id)

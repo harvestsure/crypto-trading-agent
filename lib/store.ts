@@ -157,13 +157,22 @@ export const useAppStore = create<AppState>()((set) => ({
   createExchange: async (exchange) => {
     set({ isCreatingExchange: true })
     try {
+      // Build api_keys object without empty values
+      const api_keys: {
+        api_key: string
+        secret: string
+        passphrase?: string
+      } = {
+        api_key: exchange.apiKey,
+        secret: exchange.secretKey,
+      }
+      if (exchange.passphrase) api_keys.passphrase = exchange.passphrase
+      
       const result = await api.createExchange({
         id: crypto.randomUUID(),
         name: exchange.name,
         exchange: exchange.exchange,
-        api_key: exchange.apiKey,
-        secret_key: exchange.secretKey,
-        passphrase: exchange.passphrase,
+        api_keys,
         testnet: exchange.testnet,
       })
       set({ isCreatingExchange: false })

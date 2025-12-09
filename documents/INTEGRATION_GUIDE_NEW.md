@@ -391,6 +391,7 @@ async def create_agent(agent_config: AgentConfig):
         api_key=model_config.api_key,
         model=model_config.model,
         base_url=model_config.base_url,
+        provider=model_config.provider,  # 如: 'openai', 'deepseek'
         temperature=0.7,
     )
     

@@ -139,8 +139,14 @@ export async function connectExchange(exchange: {
   id: string
   name: string
   exchange: string
-  api_key: string
-  secret_key: string
+  api_keys?: {
+    api_key: string
+    secret: string
+    passphrase?: string
+  }
+  // Legacy format support
+  api_key?: string
+  secret?: string
   passphrase?: string
   testnet: boolean
 }) {
@@ -155,8 +161,14 @@ export async function createExchange(exchange: {
   id: string
   name: string
   exchange: string
-  api_key: string
-  secret_key: string
+  api_keys?: {
+    api_key: string
+    secret: string
+    passphrase?: string
+  }
+  // Legacy format support
+  api_key?: string
+  secret?: string
   passphrase?: string
   testnet: boolean
 }) {

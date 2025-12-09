@@ -7,6 +7,7 @@ import logging
 from typing import List, Dict, Optional
 from exchanges.common_exchange import CommonExchange
 from common.data_types import DataEventType, DataEventFactory, OrderType, OrderSide
+from config import EXCHANGE_SANDBOX_MODE, EXCHANGE_SETTINGS, PROXY, SYMBOL_DISCOVERY, STRATEGY_PARAMS
 
 
 
@@ -19,15 +20,15 @@ class OkxExchange(CommonExchange):
     async def initialize(self):
         logging.info(f"Initializing {self.exchange_id} ...")
         self.ccxt_exchange = ccxtpro.okx(self.api_keys)
-        self.ccxt_exchange.aiohttp_proxy = self.config.PROXY.get('url') if self.config.PROXY.get('enabled') else None
+        self.ccxt_exchange.aiohttp_proxy = PROXY.get('url') if PROXY.get('enabled') else None
         self.ccxt_exchange.aiohttp_trust_env = True
         self.ccxt_exchange.options["defaultType"] = "swap"
         
-        is_sandbox_mode = self.config.EXCHANGE_SANDBOX_MODE.get(self.exchange_id, False)
+        is_sandbox_mode: bool = bool(self.config.get('testnet', False))
         self.ccxt_exchange.set_sandbox_mode(is_sandbox_mode)
         logging.info(f"loaded {self.exchange_id} for sandbox mode: {is_sandbox_mode}")
 
-        settings = self.config.EXCHANGE_SETTINGS.get(self.exchange_id, {})
+        settings = EXCHANGE_SETTINGS.get(self.exchange_id, {})
         # await self.cancel_all_orders()
         self.hedge_mode = settings.get('hedge_mode', True)  # 保存持仓模式设置
         await self.set_position_mode(hedge_mode=self.hedge_mode)
@@ -67,50 +68,6 @@ class OkxExchange(CommonExchange):
         except Exception as e:
             logging.error(f"Failed to set leverage for {symbol} on {self.exchange_id}: {e}")
 
-    async def fetch_dynamic_symbols(self) -> List[str]:
-        """获取动态交易对列表 - OKX 特定实现"""
-        try:
-            discovery_params = config.SYMBOL_DISCOVERY
-            markets = await self.ccxt_exchange.load_markets()
-            tickers = await self.ccxt_exchange.fetch_tickers()
-
-            quote_currencies = discovery_params.get('quote_currencies', ['USDT'])
-            top_n_per_currency = discovery_params.get('top_n_symbols_per_currency', 10)
-            
-            all_top_symbols = []
-            
-            for quote_currency in quote_currencies:
-                valid_symbols = [
-                    s for s, m in markets.items() 
-                    if m.get('type') == 'swap' and m.get('quote') == quote_currency and m.get('settle') == quote_currency
-                ]
-
-                filtered_tickers = []
-                for symbol in valid_symbols:
-                    if symbol in tickers:
-                        ticker = tickers[symbol]
-                        
-                        quote_volume = ticker.get('quoteVolume')
-                        if not quote_volume:
-                            base_volume = ticker.get('baseVolume', 0) or 0
-                            latest_price = ticker.get('last') or ticker.get('close') or ticker.get('ask') or ticker.get('bid') or 0
-                            quote_volume = base_volume * latest_price   
-                            ticker['quoteVolume'] = quote_volume                           
-                        
-                        if quote_volume > discovery_params['min_24h_volume']:
-                            filtered_tickers.append(ticker)
-
-                sorted_tickers = sorted(filtered_tickers, key=lambda x: x.get('quoteVolume', 0), reverse=True)
-                top_symbols = [t['symbol'] for t in sorted_tickers[:top_n_per_currency]]
-                all_top_symbols.extend(top_symbols)
-                logging.info(f"Discovered top {len(top_symbols)} {quote_currency} symbols on {self.exchange_id}: {top_symbols}")
-            
-            logging.info(f"Total discovered symbols on {self.exchange_id}: {len(all_top_symbols)}")
-            return all_top_symbols
-        except Exception as e:
-            logging.error(f"Error discovering symbols on {self.exchange_id}: {e}")
-            return []
-        
     async def _watch_single_data_type(self, data_type: DataEventType, symbol: str):
         """监听单个数据类型和交易对"""
         logging.info(f"Starting {data_type.name} watch for {symbol} on {self.exchange_id}")
@@ -138,7 +95,7 @@ class OkxExchange(CommonExchange):
                     event = DataEventFactory.create_orderbook_event(self.exchange_id, symbol, data)
                     
                 elif data_type == DataEventType.OHLCV:
-                    timeframe = config.STRATEGY_PARAMS['timeframe']
+                    timeframe = STRATEGY_PARAMS['timeframe']
                     data = await self.ccxt_exchange.watch_ohlcv(symbol, timeframe)
                     logging.debug(f"✅ Received OHLCV data for {symbol}")
                     event = DataEventFactory.create_ohlcv_event(self.exchange_id, symbol, timeframe, data)                  
@@ -358,3 +315,11 @@ class OkxExchange(CommonExchange):
             
             logging.error(f"❌ Exchange failed to fetch order {order_id} on {self.exchange_id} for {symbol}: {e}", exc_info=False)
             return None
+        
+    async def fetch_balance(self, params: Dict = {}) -> Dict:
+        """获取账户余额信息 - OKX 实现"""
+        try:
+            return await self.ccxt_exchange.fetch_balance(params)
+        except Exception as e:
+            logging.error(f"❌ Exchange failed to fetch balance on {self.exchange_id}: {e}", exc_info=False)
+            return {}
