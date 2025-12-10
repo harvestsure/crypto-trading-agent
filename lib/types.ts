@@ -26,7 +26,7 @@ export interface TradingAgent {
   name: string
   modelId: string
   exchangeId: string
-  symbol: string
+  symbols: string[]
   timeframe: "1m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d"
   indicators: string[]
   prompt: string

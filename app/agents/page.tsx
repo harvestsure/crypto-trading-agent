@@ -138,7 +138,7 @@ export default function AgentsPage() {
                         </div>
                         <div>
                           <h3 className="font-semibold text-foreground">{agent.name}</h3>
-                          <p className="text-sm text-muted-foreground">{agent.symbol}</p>
+                          <p className="text-sm text-muted-foreground">{agent.symbols?.join(", ")}</p>
                         </div>
                       </div>
 

@@ -145,6 +145,11 @@ class AgentManager:
                 # 如果是暂停状态，恢复运行
                 from agents.base_agent import AgentStatus
                 if agent.status == AgentStatus.PAUSED:
+                    # Resume internal agent decision loop
+                    try:
+                        await agent.resume()
+                    except Exception as e:
+                        logger.error(f"Failed to resume agent decision loop: {e}", exc_info=True)
                     agent.set_status(AgentStatus.IDLE, "Agent resumed by user")
                     # 更新数据库状态
                     AgentRepository.update(agent_id, {'status': 'running'})
@@ -196,6 +201,25 @@ class AgentManager:
             # 设置 Agent 状态为 PAUSED（决策循环会检查此状态）
             from agents.base_agent import AgentStatus
             agent.set_status(AgentStatus.PAUSED, "Agent paused by user")
+            # Cancel internal decision loop to actually pause activity
+            try:
+                await agent.pause()
+            except Exception as e:
+                logger.error(f"Failed to pause agent decision loop: {e}", exc_info=True)
+
+            # Also cancel the manager task for this agent if present
+            if agent_id in self.agent_tasks:
+                try:
+                    task = self.agent_tasks[agent_id]
+                    task.cancel()
+                    await task
+                except asyncio.CancelledError:
+                    logger.info(f"Agent manager task cancelled for {agent_id}")
+                except Exception as e:
+                    logger.error(f"Error cancelling agent manager task for {agent_id}: {e}", exc_info=True)
+                finally:
+                    if agent_id in self.agent_tasks:
+                        del self.agent_tasks[agent_id]
             
             # 更新数据库状态
             AgentRepository.update(agent_id, {
@@ -223,6 +247,20 @@ class AgentManager:
             # 先停止 Agent
             await self.stop_agent(agent_id)
             
+            # Ensure manager task is cancelled
+            if agent_id in self.agent_tasks:
+                try:
+                    t = self.agent_tasks[agent_id]
+                    t.cancel()
+                    await t
+                except asyncio.CancelledError:
+                    logger.info(f"Agent manager task cancelled during delete for {agent_id}")
+                except Exception as e:
+                    logger.error(f"Error cancelling agent task during delete for {agent_id}: {e}", exc_info=True)
+                finally:
+                    if agent_id in self.agent_tasks:
+                        del self.agent_tasks[agent_id]
+
             # 从管理器中移除
             if agent_id in self.agents:
                 del self.agents[agent_id]

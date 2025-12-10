@@ -310,11 +310,10 @@ class SmartTradingAgent(BaseAgent):
         try:
             while True:
                 try:
-                    # 检查是否被暂停
+                    # 检查是否被暂停 — 如果暂停则退出决策循环，等待由外部 resume() 重新启动
                     if self.status == AgentStatus.PAUSED:
-                        logger.info(f"Agent {self.name} is paused, skipping decision")
-                        await asyncio.sleep(5)  # 暂停时每5秒检查一次
-                        continue
+                        logger.info(f"Agent {self.name} paused — stopping decision loop")
+                        return
                     
                     # 执行一次决策
                     await self._make_decision()
@@ -363,6 +362,23 @@ class SmartTradingAgent(BaseAgent):
         except Exception as e:
             logger.error(f"Error making decision: {e}", exc_info=True)
             raise
+
+    async def pause(self):
+        """Pause the agent by cancelling its decision loop task."""
+        if self.decision_loop_task:
+            self.decision_loop_task.cancel()
+            try:
+                await self.decision_loop_task
+            except asyncio.CancelledError:
+                pass
+            self.decision_loop_task = None
+            logger.info(f"Agent {self.name} decision loop paused")
+
+    async def resume(self):
+        """Resume the agent by starting the decision loop if not running."""
+        if not self.decision_loop_task or self.decision_loop_task.done():
+            self.decision_loop_task = asyncio.create_task(self._decision_loop())
+            logger.info(f"Agent {self.name} decision loop resumed")
     
     def _build_market_context(self) -> MarketContext:
         """构建市场上下文"""

@@ -51,7 +51,7 @@ interface AppState {
     name: string
     modelId: string
     exchangeId: string
-    symbol: string
+    symbols: string[]
     timeframe: string
     indicators: string[]
     prompt: string
@@ -122,7 +122,13 @@ export const useAppStore = create<AppState>()((set) => ({
         name: a.name,
         modelId: a.model_id,
         exchangeId: a.exchange_id,
-        symbol: a.symbol,
+        symbols: Array.isArray(a.symbols)
+          ? a.symbols
+          : Array.isArray(a.symbol)
+          ? a.symbol
+          : a.symbol
+          ? [a.symbol]
+          : [],
         timeframe: a.timeframe,
         indicators: a.indicators || [],
         prompt: a.prompt || "",
@@ -246,7 +252,7 @@ export const useAppStore = create<AppState>()((set) => ({
         name: agent.name,
         model_id: agent.modelId,
         exchange_id: agent.exchangeId,
-        symbol: agent.symbol,
+        symbols: agent.symbols,
         timeframe: agent.timeframe,
         indicators: agent.indicators,
         prompt: agent.prompt,

@@ -171,7 +171,11 @@ function normalizeAgent(data: any) {
     name: data.name,
     modelId: data.modelId || data.model_id,
     exchangeId: data.exchangeId || data.exchange_id,
-    symbol: data.symbol,
+    symbols: Array.isArray(data.symbols)
+      ? data.symbols
+      : data.symbol
+      ? [data.symbol]
+      : [],
     timeframe: data.timeframe,
     status: data.status ?? "paused",
     indicators: data.indicators || [],
@@ -234,7 +238,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
   const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected && !!agent)
   const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected && !!agent)
-  const { ticker } = useTicker(exchange?.id ?? "", agent?.symbol ?? "", backendConnected && !!exchange && !!agent)
+  const { ticker } = useTicker(exchange?.id ?? "", agent?.symbols?.[0] ?? "", backendConnected && !!exchange && !!agent)
 
   // Use real data when available, otherwise use mock data
   const positions = backendConnected && realPositions.length > 0 ? realPositions : mockPositions
@@ -379,7 +383,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
       <div className="flex min-h-screen">
         <Sidebar />
         <main className="flex-1 pl-64">
-          <Header title={agent.name} description={`${agent.symbol} · ${agent.timeframe}`} />
+          <Header title={agent.name} description={`${(agent.symbols ?? []).join(", ")} · ${agent.timeframe}`} />
 
           <div className="p-6">
             {/* Top Navigation & Controls */}
@@ -530,7 +534,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <CardTitle>{agent.symbol}</CardTitle>
+                        <CardTitle>{(agent.symbols ?? []).join(", ")}</CardTitle>
                         <CardDescription>
                           {exchange?.name ?? "Exchange"} · {agent.timeframe} timeframe
                         </CardDescription>
@@ -550,7 +554,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <KlineChart symbol={agent.symbol ?? ""} timeframe={agent.timeframe ?? "1h"} />
+                    <KlineChart symbol={agent.symbols?.[0] ?? ""} timeframe={agent.timeframe ?? "1h"} />
                   </CardContent>
                 </Card>
                 <ProfitChart data={profitData} title="30-Day Performance" />

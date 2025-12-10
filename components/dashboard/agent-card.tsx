@@ -44,7 +44,7 @@ export function AgentCard({ agent, modelName, exchangeName, onToggle, onDelete }
                 {agent.name}
               </h3>
             </Link>
-            <p className="text-sm text-muted-foreground truncate">{agent.symbol}</p>
+            <p className="text-sm text-muted-foreground truncate">{agent.symbols?.join(", ")}</p>
           </div>
         </div>
 

@@ -282,7 +282,7 @@ export async function getAgents() {
       name: string
       model_id: string
       exchange_id: string
-      symbol: string
+      symbols: string[]
       timeframe: string
       indicators: string[]
       prompt: string
@@ -306,7 +306,7 @@ export async function getAgent(agentId: string) {
     name: string
     model_id: string
     exchange_id: string
-    symbol: string
+    symbols: string[]
     timeframe: string
     indicators: string[]
     prompt: string
@@ -328,7 +328,7 @@ export async function createAgent(agent: {
   name: string
   model_id: string
   exchange_id: string
-  symbol: string
+  symbols: string[]
   timeframe: string
   indicators: string[]
   prompt: string
