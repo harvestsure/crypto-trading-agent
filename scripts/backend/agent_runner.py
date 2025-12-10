@@ -134,61 +134,142 @@ class AgentRunner:
                 await asyncio.sleep(30)  # Wait before retry
     
     async def _analyze_and_trade(self, agent: AgentState):
-        """Fetch data, analyze with AI, and execute trades"""
+        """
+        Fetch data, analyze with AI, and execute trades
+        """
         try:
             # 1. Fetch Kline Data
             kline_data = await self._fetch_klines(agent)
-            if not kline_data:
-                await self._emit_log(agent.agent_id, "warning", "No kline data available")
+            if not kline_data or len(kline_data) < 20:
+                await self._emit_log(
+                    agent.agent_id, 
+                    "warning", 
+                    f"Insufficient kline data: {len(kline_data) if kline_data else 0} candles (need ≥20)"
+                )
                 return
             
             # 2. Calculate Indicators
-            indicators = self.indicator_calculator.calculate_all(kline_data, agent.indicators)
-            await self._emit_log(
-                agent.agent_id, 
-                "info", 
-                f"Indicators calculated: {', '.join(f'{k}={v}' for k, v in indicators.items())}"
-            )
+            try:
+                indicators = self.indicator_calculator.calculate_all(kline_data, agent.indicators)
+                
+                if not indicators or len(indicators) == 0:
+                    await self._emit_log(agent.agent_id, "warning", "No indicators calculated")
+                    return
+                
+                # Log key indicators
+                key_indicators = {
+                    k: f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+                    for k, v in list(indicators.items())[:5]
+                }
+                await self._emit_log(
+                    agent.agent_id, 
+                    "info", 
+                    f"Indicators: {', '.join(f'{k}={v}' for k, v in key_indicators.items())}"
+                )
+            except Exception as e:
+                logger.error(f"Indicator calculation error: {e}")
+                await self._emit_log(agent.agent_id, "error", f"Indicator error: {str(e)}")
+                return
             
             # 3. Get AI Analysis
-            signal = await self.ai_manager.analyze(
-                agent.model_id,
-                kline_data,
-                indicators,
-                agent.prompt,
+            try:
+                signal = await self.ai_manager.analyze(
+                    agent.model_id,
+                    kline_data,
+                    indicators,
+                    agent.prompt,
+                )
+                
+                if not signal or not hasattr(signal, 'action'):
+                    await self._emit_log(agent.agent_id, "error", "Invalid AI signal received")
+                    return
+                
+                agent.last_signal = {
+                    'action': signal.action,
+                    'reason': signal.reason,
+                    'confidence': getattr(signal, 'confidence', 'medium'),
+                    'take_profit': signal.take_profit,
+                    'stop_loss': signal.stop_loss,
+                    'timestamp': datetime.utcnow().isoformat(),
+                }
+                agent.last_analysis_time = datetime.utcnow()
+                
+                # Emit signal event
+                if self.on_signal:
+                    await self.on_signal({
+                        'agent_id': agent.agent_id,
+                        'signal': agent.last_signal,
+                        'indicators': indicators,
+                    })
+                
+                await self._emit_log(
+                    agent.agent_id,
+                    "signal",
+                    f"AI Signal: {signal.action.upper()} (Confidence: {agent.last_signal['confidence']}) - {signal.reason[:100]}"
+                )
+                
+                # 4. Execute Trade if signal is buy/sell
+                if signal.action in ('buy', 'sell', 'long', 'short'):
+                    await self._execute_trade(agent, signal, kline_data[-1])
+                elif signal.action == 'close':
+                    await self._close_position(agent)
+                
+            except Exception as e:
+                logger.error(f"AI analysis error: {e}", exc_info=True)
+                await self._emit_log(agent.agent_id, "error", f"AI analysis failed: {str(e)}")
+                return
+            
+        except Exception as e:
+            logger.error(f"Analysis error for agent {agent.agent_id}: {e}", exc_info=True)
+            await self._emit_log(agent.agent_id, "error", f"Analysis failed: {str(e)}")
+
+    async def _close_position(self, agent: AgentState):
+        """
+        Close current position
+        """
+        try:
+            if not agent.position:
+                await self._emit_log(agent.agent_id, "info", "No position to close")
+                return
+            
+            exchange = self.exchange_manager.exchanges.get(agent.exchange_id)
+            if not exchange:
+                await self._emit_log(agent.agent_id, "error", "Exchange not connected")
+                return
+            
+            # Close position (sell if long, buy if short)
+            close_side = 'sell' if agent.position['side'] == 'buy' else 'buy'
+            
+            order = await self.exchange_manager.place_order(
+                agent.exchange_id,
+                agent.symbol,
+                close_side,
+                'market',
+                agent.position['amount'],
             )
             
-            agent.last_signal = {
-                'action': signal.action,
-                'reason': signal.reason,
-                'take_profit': signal.take_profit,
-                'stop_loss': signal.stop_loss,
-                'timestamp': datetime.utcnow().isoformat(),
-            }
-            agent.last_analysis_time = datetime.utcnow()
+            # Calculate PnL
+            entry_price = agent.position['entry_price']
+            current_price = order.get('price', entry_price)
+            pnl = (current_price - entry_price) * agent.position['amount']
+            if agent.position['side'] == 'sell':
+                pnl = -pnl
             
-            # Emit signal event
-            if self.on_signal:
-                await self.on_signal({
-                    'agent_id': agent.agent_id,
-                    'signal': agent.last_signal,
-                    'indicators': indicators,
-                })
+            pnl_percent = (pnl / (entry_price * agent.position['amount'])) * 100
             
             await self._emit_log(
                 agent.agent_id,
-                "signal",
-                f"AI Signal: {signal.action.upper()} - {signal.reason}"
+                "order",
+                f"Position closed: PnL ${pnl:.2f} ({pnl_percent:+.2f}%)"
             )
             
-            # 4. Execute Trade if signal is buy/sell
-            if signal.action in ('buy', 'sell'):
-                await self._execute_trade(agent, signal, kline_data[-1])
+            # Clear position
+            agent.position = None
             
         except Exception as e:
-            logger.error(f"Analysis error for agent {agent.agent_id}: {e}")
-            await self._emit_log(agent.agent_id, "error", f"Analysis failed: {str(e)}")
-    
+            logger.error(f"Position close error: {e}")
+            await self._emit_log(agent.agent_id, "error", f"Close failed: {str(e)}")
+
     async def _fetch_klines(self, agent: AgentState) -> List[dict]:
         """Fetch kline data from exchange"""
         cache_key = f"{agent.exchange_id}_{agent.symbol}_{agent.timeframe}"

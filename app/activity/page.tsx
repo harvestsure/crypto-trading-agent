@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -173,139 +174,141 @@ export default function ActivityPage() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 pl-64">
-        <Header title="Activity" description="Real-time activity log from all trading agents" />
+    <ProtectedRoute>
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <main className="flex-1 pl-64">
+          <Header title="Activity" description="Real-time activity log from all trading agents" />
 
-        <div className="p-6">
-          {/* Filters */}
-          <div className="mb-6 flex flex-wrap items-center gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search activities..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
+          <div className="p-6">
+            {/* Filters */}
+            <div className="mb-6 flex flex-wrap items-center gap-4">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Search activities..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Select value={filter} onValueChange={setFilter}>
+                <SelectTrigger className="w-40">
+                  <Filter className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Filter" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Events</SelectItem>
+                  <SelectItem value="signal">Signals</SelectItem>
+                  <SelectItem value="order">Orders</SelectItem>
+                  <SelectItem value="error">Errors</SelectItem>
+                  <SelectItem value="status">Status</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setFilter("all")
+                  setSearchQuery("")
+                }}
+              >
+                Clear Filters
+              </Button>
             </div>
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger className="w-40">
-                <Filter className="mr-2 h-4 w-4" />
-                <SelectValue placeholder="Filter" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Events</SelectItem>
-                <SelectItem value="signal">Signals</SelectItem>
-                <SelectItem value="order">Orders</SelectItem>
-                <SelectItem value="error">Errors</SelectItem>
-                <SelectItem value="status">Status</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setFilter("all")
-                setSearchQuery("")
-              }}
-            >
-              Clear Filters
-            </Button>
-          </div>
 
-          {/* Activity Stats */}
-          <div className="mb-6 grid gap-4 md:grid-cols-4">
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-foreground">
-                  {activities.filter((a) => a.type === "signal").length}
-                </div>
-                <p className="text-sm text-muted-foreground">Signals Today</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-success">
-                  {activities.filter((a) => a.type === "order" && a.metadata?.status === "success").length}
-                </div>
-                <p className="text-sm text-muted-foreground">Orders Filled</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-destructive">
-                  {activities.filter((a) => a.type === "error").length}
-                </div>
-                <p className="text-sm text-muted-foreground">Errors</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="text-2xl font-bold text-primary">
-                  {agents.filter((a) => a.status === "running").length}
-                </div>
-                <p className="text-sm text-muted-foreground">Active Agents</p>
-              </CardContent>
-            </Card>
-          </div>
+            {/* Activity Stats */}
+            <div className="mb-6 grid gap-4 md:grid-cols-4">
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-foreground">
+                    {activities.filter((a) => a.type === "signal").length}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Signals Today</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-success">
+                    {activities.filter((a) => a.type === "order" && a.metadata?.status === "success").length}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Orders Filled</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-destructive">
+                    {activities.filter((a) => a.type === "error").length}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Errors</p>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardContent className="p-4">
+                  <div className="text-2xl font-bold text-primary">
+                    {agents.filter((a) => a.status === "running").length}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Active Agents</p>
+                </CardContent>
+              </Card>
+            </div>
 
-          {/* Activity List */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Recent Activity</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {filteredActivities.map((activity) => (
-                  <div
-                    key={activity.id}
-                    className="flex gap-4 rounded-lg border border-border p-4 transition-colors hover:bg-secondary/30"
-                  >
-                    <div className="flex-shrink-0 pt-0.5">{getEventIcon(activity)}</div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <p className="font-medium text-foreground">{activity.title}</p>
-                          <p className="text-sm text-muted-foreground">{activity.description}</p>
-                        </div>
-                        <span className="flex-shrink-0 text-xs text-muted-foreground">
-                          {formatTime(activity.timestamp)}
-                        </span>
-                      </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <Badge variant="outline" className="text-xs">
-                          {activity.agentName}
-                        </Badge>
-                        {activity.metadata?.symbol && (
-                          <Badge variant="secondary" className="text-xs">
-                            {activity.metadata.symbol}
-                          </Badge>
-                        )}
-                        {activity.metadata?.price && (
-                          <span className="text-xs text-muted-foreground">
-                            @ ${activity.metadata.price.toLocaleString()}
+            {/* Activity List */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Recent Activity</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {filteredActivities.map((activity) => (
+                    <div
+                      key={activity.id}
+                      className="flex gap-4 rounded-lg border border-border p-4 transition-colors hover:bg-secondary/30"
+                    >
+                      <div className="flex-shrink-0 pt-0.5">{getEventIcon(activity)}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <p className="font-medium text-foreground">{activity.title}</p>
+                            <p className="text-sm text-muted-foreground">{activity.description}</p>
+                          </div>
+                          <span className="flex-shrink-0 text-xs text-muted-foreground">
+                            {formatTime(activity.timestamp)}
                           </span>
-                        )}
-                        {activity.metadata?.amount && (
-                          <span className="text-xs text-muted-foreground">Amount: {activity.metadata.amount}</span>
-                        )}
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                          <Badge variant="outline" className="text-xs">
+                            {activity.agentName}
+                          </Badge>
+                          {activity.metadata?.symbol && (
+                            <Badge variant="secondary" className="text-xs">
+                              {activity.metadata.symbol}
+                            </Badge>
+                          )}
+                          {activity.metadata?.price && (
+                            <span className="text-xs text-muted-foreground">
+                              @ ${activity.metadata.price.toLocaleString()}
+                            </span>
+                          )}
+                          {activity.metadata?.amount && (
+                            <span className="text-xs text-muted-foreground">Amount: {activity.metadata.amount}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
 
-                {filteredActivities.length === 0 && (
-                  <div className="py-12 text-center">
-                    <Bot className="mx-auto h-12 w-12 text-muted-foreground" />
-                    <p className="mt-4 text-muted-foreground">No activities found</p>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </main>
-    </div>
+                  {filteredActivities.length === 0 && (
+                    <div className="py-12 text-center">
+                      <Bot className="mx-auto h-12 w-12 text-muted-foreground" />
+                      <p className="mt-4 text-muted-foreground">No activities found</p>
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </main>
+      </div>
+    </ProtectedRoute>
   )
 }

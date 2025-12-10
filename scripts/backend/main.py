@@ -35,6 +35,7 @@ from database import (
 from exchange_manager import ExchangeManager
 from agent_manager import AgentManager
 from routes.agent_conversation_routes import router as conversation_router
+from routes.auth_routes import router as auth_router
 
 # Initialize logging
 init_logging()
@@ -403,9 +404,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CryptoAgent API", lifespan=lifespan)
 
+# CORS configuration - allow specific origins when using credentials
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://localhost:3000",
+        # Add production frontend URL here if needed
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -413,11 +420,12 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(conversation_router)
-
+app.include_router(auth_router)
 
 # ============== Health Check ==============
 
 @app.get("/health")
+@app.get("/api/health")
 async def health_check():
     running_count = len(agent_manager.get_all_agents()) if agent_manager else 0
     return {
@@ -1238,4 +1246,4 @@ async def run_agent_loop(agent_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="127.0.0.1", port=8000)

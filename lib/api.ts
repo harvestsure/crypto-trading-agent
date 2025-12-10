@@ -1,6 +1,9 @@
 /**
  * API Service - REST API calls to Python backend
+ * Enhanced with better error handling and retry logic
  */
+
+import { authAPI } from "./auth"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
 
@@ -9,26 +12,84 @@ interface ApiResponse<T> {
   error?: string
 }
 
-async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-  try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      ...options,
-      headers: {
+async function fetchApi<T>(endpoint: string, options: RequestInit = {}, retries = 2): Promise<ApiResponse<T>> {
+  let lastError = "Unknown error"
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const controller = new AbortController()
+      const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
+
+      const token = authAPI.getToken()
+      const headers: HeadersInit = {
         "Content-Type": "application/json",
         ...options.headers,
-      },
-    })
+      }
 
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({ detail: "Request failed" }))
-      return { error: error.detail || "Request failed" }
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`
+      }
+
+      const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+        ...options,
+        headers,
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({
+          detail: `Request failed with status ${response.status}`,
+        }))
+        lastError = error.detail || `HTTP ${response.status}`
+
+        if (response.status === 401) {
+          authAPI.clearToken()
+          if (typeof window !== "undefined") {
+            window.location.href = "/login"
+          }
+          return { error: "Unauthorized - please login again" }
+        }
+
+        // Don't retry on client errors (4xx)
+        if (response.status >= 400 && response.status < 500) {
+          return { error: lastError }
+        }
+
+        // Retry on server errors (5xx) or network issues
+        if (attempt < retries) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+          continue
+        }
+
+        return { error: lastError }
+      }
+
+      const data = await response.json()
+      return { data }
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.name === "AbortError") {
+          lastError = "Request timeout - backend may be offline"
+        } else if (error.message.includes("fetch")) {
+          lastError = "Network error - cannot reach backend"
+        } else {
+          lastError = error.message
+        }
+      } else {
+        lastError = "Unknown error occurred"
+      }
+
+      // Retry on network errors
+      if (attempt < retries) {
+        await new Promise((resolve) => setTimeout(resolve, 1000 * (attempt + 1)))
+        continue
+      }
     }
-
-    const data = await response.json()
-    return { data }
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "Network error" }
   }
+
+  return { error: lastError }
 }
 
 export { API_BASE_URL }
@@ -40,7 +101,7 @@ export async function checkHealth() {
     timestamp: string
     exchanges_connected: number
     models_registered: number
-  }>("/health")
+  }>("/health", {}, 0) // No retries for health check
 }
 
 // ============== AI Models ==============

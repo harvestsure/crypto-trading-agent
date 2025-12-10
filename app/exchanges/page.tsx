@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useExchanges } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
+import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { CreateExchangeModal } from "@/components/modals/create-exchange-modal"
@@ -15,7 +16,7 @@ import { Plus, MoreVertical, Building2, Trash2, RefreshCw, Loader2, AlertCircle,
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
-export default function ExchangesPage() {
+function ExchangesPageContent() {
   const { exchanges, isLoading, mutate } = useExchanges()
   const { updateExchange, deleteExchange } = useAppStore()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -160,5 +161,13 @@ export default function ExchangesPage() {
         <CreateExchangeModal open={isCreateOpen} onOpenChange={setIsCreateOpen} onSuccess={() => mutate()} />
       </main>
     </div>
+  )
+}
+
+export default function ExchangesPage() {
+  return (
+    <ProtectedRoute>
+      <ExchangesPageContent />
+    </ProtectedRoute>
   )
 }

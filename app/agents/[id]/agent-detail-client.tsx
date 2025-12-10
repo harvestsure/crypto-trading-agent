@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import useSWR from "swr"
+import { ProtectedRoute } from "@/components/auth/protected-route"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
@@ -199,7 +200,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected && !!agent)
   const { ticker } = useTicker(exchange?.id ?? "", agent?.symbol ?? "", backendConnected && !!exchange && !!agent)
 
-
   // Use real data when available, otherwise use mock data
   const positions = backendConnected && realPositions.length > 0 ? realPositions : mockPositions
   const balance = backendConnected && realBalance ? realBalance : mockBalance
@@ -306,266 +306,272 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const isProfitable = pnl >= 0
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className="flex-1 pl-64">
-        <Header title={agent.name} description={`${agent.symbol} · ${agent.timeframe}`} />
+    <ProtectedRoute>
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <main className="flex-1 pl-64">
+          <Header title={agent.name} description={`${agent.symbol} · ${agent.timeframe}`} />
 
-        <div className="p-6">
-          {/* Top Navigation & Controls */}
-          <div className="mb-6 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button variant="ghost" onClick={() => router.push("/agents")}>
-                <ArrowLeft className="mr-2 h-4 w-4" />
-                Back
-              </Button>
-              <Badge variant={backendConnected ? "default" : "secondary"} className="text-xs">
-                {backendConnected ? "Live Data" : "Demo Mode"}
-              </Badge>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Badge
-                variant={isRunning ? "default" : "secondary"}
-                className={cn(isRunning && "bg-success text-success-foreground")}
-              >
-                {isRunning ? "Running" : agent.status}
-              </Badge>
-              {backendConnected && (
-                <Button variant="outline" size="sm" onClick={handleTriggerAnalysis} disabled={isAnalyzing}>
-                  {isAnalyzing ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <Zap className="mr-2 h-4 w-4" />}
-                  Analyze Now
+          <div className="p-6">
+            {/* Top Navigation & Controls */}
+            <div className="mb-6 flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <Button variant="ghost" onClick={() => router.push("/agents")}>
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Back
                 </Button>
-              )}
-              <Button variant="outline" size="icon">
-                <Settings className="h-4 w-4" />
-              </Button>
-              <Button onClick={handleToggle}>
-                {isRunning ? (
-                  <>
-                    <Pause className="mr-2 h-4 w-4" /> Pause
-                  </>
-                ) : (
-                  <>
-                    <Play className="mr-2 h-4 w-4" /> Start
-                  </>
+                <Badge variant={backendConnected ? "default" : "secondary"} className="text-xs">
+                  {backendConnected ? "Live Data" : "Demo Mode"}
+                </Badge>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <Badge
+                  variant={isRunning ? "default" : "secondary"}
+                  className={cn(isRunning && "bg-success text-success-foreground")}
+                >
+                  {isRunning ? "Running" : agent.status}
+                </Badge>
+                {backendConnected && (
+                  <Button variant="outline" size="sm" onClick={handleTriggerAnalysis} disabled={isAnalyzing}>
+                    {isAnalyzing ? (
+                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Zap className="mr-2 h-4 w-4" />
+                    )}
+                    Analyze Now
+                  </Button>
                 )}
-              </Button>
-            </div>
-          </div>
-
-          {/* Stats Cards */}
-          <div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Current Price</p>
-                    <p className="text-2xl font-bold text-foreground">${currentPrice.toLocaleString()}</p>
-                    <p
-                      className={cn(
-                        "flex items-center text-sm",
-                        priceChange >= 0 ? "text-success" : "text-destructive",
-                      )}
-                    >
-                      {priceChange >= 0 ? (
-                        <TrendingUp className="mr-1 h-3 w-3" />
-                      ) : (
-                        <TrendingDown className="mr-1 h-3 w-3" />
-                      )}
-                      {priceChange >= 0 ? "+" : ""}
-                      {priceChange.toFixed(2)}%
-                    </p>
-                  </div>
-                  <Activity className="h-8 w-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total Balance</p>
-                    <p className="text-2xl font-bold text-foreground">${(balance?.totalBalance ?? 0).toLocaleString()}</p>
-                    <p className="text-sm text-muted-foreground">
-                      ${(balance?.availableBalance ?? 0).toLocaleString()} available
-                    </p>
-                  </div>
-                  <Wallet className="h-8 w-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total PnL</p>
-                    <p className={cn("text-2xl font-bold", isProfitable ? "text-success" : "text-destructive")}>
-                      {isProfitable ? "+" : ""}
-                      {pnl.toFixed(2)}%
-                    </p>
-                    <p className="text-sm text-muted-foreground">{totalTrades} trades</p>
-                  </div>
-                  {isProfitable ? (
-                    <TrendingUp className="h-8 w-8 text-success" />
+                <Button variant="outline" size="icon">
+                  <Settings className="h-4 w-4" />
+                </Button>
+                <Button onClick={handleToggle}>
+                  {isRunning ? (
+                    <>
+                      <Pause className="mr-2 h-4 w-4" /> Pause
+                    </>
                   ) : (
-                    <TrendingDown className="h-8 w-8 text-destructive" />
+                    <>
+                      <Play className="mr-2 h-4 w-4" /> Start
+                    </>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </Button>
+              </div>
+            </div>
 
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Win Rate</p>
-                    <p className="text-2xl font-bold text-foreground">{winRate}%</p>
-                    <p className="text-sm text-muted-foreground">Last 30 days</p>
-                  </div>
-                  <Target className="h-8 w-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-muted-foreground">Last Signal</p>
-                    <p className="text-2xl font-bold text-foreground capitalize">
-                      {lastSignal?.action ?? "None"}
-                    </p>
-                    <p className="text-sm text-muted-foreground">
-                      {lastSignal ? new Date((lastSignal as any).timestamp).toLocaleTimeString() : "No signals yet"}
-                    </p>
-                  </div>
-                  <Clock className="h-8 w-8 text-primary" />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Main Content - 3 Column Layout */}
-          <div className="grid gap-6 lg:grid-cols-4">
-            {/* Chart Section */}
-            <div className="lg:col-span-2 space-y-6">
+            {/* Stats Cards */}
+            <div className="mb-6 grid gap-4 md:grid-cols-2 lg:grid-cols-5">
               <Card>
-                <CardHeader className="pb-2">
+                <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <CardTitle>{agent.symbol}</CardTitle>
-                      <CardDescription>
-                        {exchange?.name ?? "Exchange"} · {agent.timeframe} timeframe
-                      </CardDescription>
+                      <p className="text-sm text-muted-foreground">Current Price</p>
+                      <p className="text-2xl font-bold text-foreground">${currentPrice.toLocaleString()}</p>
+                      <p
+                        className={cn(
+                          "flex items-center text-sm",
+                          priceChange >= 0 ? "text-success" : "text-destructive",
+                        )}
+                      >
+                        {priceChange >= 0 ? (
+                          <TrendingUp className="mr-1 h-3 w-3" />
+                        ) : (
+                          <TrendingDown className="mr-1 h-3 w-3" />
+                        )}
+                        {priceChange >= 0 ? "+" : ""}
+                        {priceChange.toFixed(2)}%
+                      </p>
                     </div>
-                    <div className="flex gap-2">
-                      {["1m", "5m", "15m", "1h", "4h", "1d"].map((tf) => (
-                        <Button
-                          key={tf}
-                          variant={agent.timeframe === tf ? "default" : "ghost"}
-                          size="sm"
-                          className="h-7 px-2 text-xs"
-                        >
-                          {tf}
-                        </Button>
-                      ))}
-                    </div>
+                    <Activity className="h-8 w-8 text-primary" />
                   </div>
-                </CardHeader>
-                <CardContent>
-                  <KlineChart symbol={agent.symbol ?? ""} timeframe={agent.timeframe ?? "1h"} />
                 </CardContent>
               </Card>
-              <ProfitChart data={profitData} title="30-Day Performance" />
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Balance</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        ${(balance?.totalBalance ?? 0).toLocaleString()}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        ${(balance?.availableBalance ?? 0).toLocaleString()} available
+                      </p>
+                    </div>
+                    <Wallet className="h-8 w-8 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total PnL</p>
+                      <p className={cn("text-2xl font-bold", isProfitable ? "text-success" : "text-destructive")}>
+                        {isProfitable ? "+" : ""}
+                        {pnl.toFixed(2)}%
+                      </p>
+                      <p className="text-sm text-muted-foreground">{totalTrades} trades</p>
+                    </div>
+                    {isProfitable ? (
+                      <TrendingUp className="h-8 w-8 text-success" />
+                    ) : (
+                      <TrendingDown className="h-8 w-8 text-destructive" />
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Win Rate</p>
+                      <p className="text-2xl font-bold text-foreground">{winRate}%</p>
+                      <p className="text-sm text-muted-foreground">Last 30 days</p>
+                    </div>
+                    <Target className="h-8 w-8 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Last Signal</p>
+                      <p className="text-2xl font-bold text-foreground capitalize">{lastSignal?.action ?? "None"}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {lastSignal ? new Date((lastSignal as any).timestamp).toLocaleTimeString() : "No signals yet"}
+                      </p>
+                    </div>
+                    <Clock className="h-8 w-8 text-primary" />
+                  </div>
+                </CardContent>
+              </Card>
             </div>
 
-            {/* Positions & Indicators Panel */}
-            <div className="space-y-6">
-              <PositionPanel positions={positions} balance={balance} />
-              <IndicatorPanel indicators={indicators} />
-            </div>
-
-            {/* AI Conversation & Tools */}
-            <div className="space-y-6">
-              <ConversationHistory messages={conversations} />
-            </div>
-          </div>
-
-          {/* Tabs Section */}
-          <div className="mt-6">
-            <Tabs defaultValue="tools">
-              <TabsList>
-                <TabsTrigger value="tools" className="flex items-center gap-2">
-                  <Wrench className="h-4 w-4" />
-                  Tool Operations
-                </TabsTrigger>
-                <TabsTrigger value="signals">Signals</TabsTrigger>
-                <TabsTrigger value="orders">Orders</TabsTrigger>
-                <TabsTrigger value="logs">Logs</TabsTrigger>
-                <TabsTrigger value="config">Configuration</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="tools" className="mt-4">
-                <ToolOperations toolCalls={toolCalls} />
-              </TabsContent>
-
-              <TabsContent value="signals" className="mt-4">
-                <SignalHistory agentId={agent.id} />
-              </TabsContent>
-
-              <TabsContent value="orders" className="mt-4">
-                <OrdersTable agentId={agent.id} />
-              </TabsContent>
-
-              <TabsContent value="logs" className="mt-4">
-                <AgentLogs agentId={agent.id} />
-              </TabsContent>
-
-              <TabsContent value="config" className="mt-4">
+            {/* Main Content - 3 Column Layout */}
+            <div className="grid gap-6 lg:grid-cols-4">
+              {/* Chart Section */}
+              <div className="lg:col-span-2 space-y-6">
                 <Card>
-                  <CardHeader>
-                    <CardTitle>Agent Configuration</CardTitle>
-                    <CardDescription>Current settings for this trading agent</CardDescription>
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle>{agent.symbol}</CardTitle>
+                        <CardDescription>
+                          {exchange?.name ?? "Exchange"} · {agent.timeframe} timeframe
+                        </CardDescription>
+                      </div>
+                      <div className="flex gap-2">
+                        {["1m", "5m", "15m", "1h", "4h", "1d"].map((tf) => (
+                          <Button
+                            key={tf}
+                            variant={agent.timeframe === tf ? "default" : "ghost"}
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                          >
+                            {tf}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
                   </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="rounded-lg border border-border p-4">
-                        <p className="text-sm font-medium text-muted-foreground">AI Model</p>
-                        <p className="text-foreground">{model?.name ?? "Unknown"}</p>
-                        <p className="text-xs text-muted-foreground">{model?.model}</p>
-                      </div>
-                      <div className="rounded-lg border border-border p-4">
-                        <p className="text-sm font-medium text-muted-foreground">Exchange</p>
-                        <p className="text-foreground">{exchange?.name ?? "Unknown"}</p>
-                        <p className="text-xs text-muted-foreground capitalize">{exchange?.exchange}</p>
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-border p-4">
-                      <p className="text-sm font-medium text-muted-foreground mb-2">Indicators</p>
-                      <div className="flex flex-wrap gap-2">
-                                {indicators.map((ind: string) => (
-                                  <Badge key={ind} variant="secondary">
-                                    {ind}
-                                  </Badge>
-                                ))}
-                      </div>
-                    </div>
-                    <div className="rounded-lg border border-border p-4">
-                      <p className="text-sm font-medium text-muted-foreground mb-2">System Prompt</p>
-                      <pre className="whitespace-pre-wrap rounded bg-secondary p-3 text-xs text-foreground font-mono">
-                        {(agent as any).prompt ?? ""}
-                      </pre>
-                    </div>
+                  <CardContent>
+                    <KlineChart symbol={agent.symbol ?? ""} timeframe={agent.timeframe ?? "1h"} />
                   </CardContent>
                 </Card>
-              </TabsContent>
-            </Tabs>
+                <ProfitChart data={profitData} title="30-Day Performance" />
+              </div>
+
+              {/* Positions & Indicators Panel */}
+              <div className="space-y-6">
+                <PositionPanel positions={positions} balance={balance} />
+                <IndicatorPanel indicators={indicators} />
+              </div>
+
+              {/* AI Conversation & Tools */}
+              <div className="space-y-6">
+                <ConversationHistory messages={conversations} />
+              </div>
+            </div>
+
+            {/* Tabs Section */}
+            <div className="mt-6">
+              <Tabs defaultValue="tools">
+                <TabsList>
+                  <TabsTrigger value="tools" className="flex items-center gap-2">
+                    <Wrench className="h-4 w-4" />
+                    Tool Operations
+                  </TabsTrigger>
+                  <TabsTrigger value="signals">Signals</TabsTrigger>
+                  <TabsTrigger value="orders">Orders</TabsTrigger>
+                  <TabsTrigger value="logs">Logs</TabsTrigger>
+                  <TabsTrigger value="config">Configuration</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="tools" className="mt-4">
+                  <ToolOperations toolCalls={toolCalls} />
+                </TabsContent>
+
+                <TabsContent value="signals" className="mt-4">
+                  <SignalHistory agentId={agent.id} />
+                </TabsContent>
+
+                <TabsContent value="orders" className="mt-4">
+                  <OrdersTable agentId={agent.id} />
+                </TabsContent>
+
+                <TabsContent value="logs" className="mt-4">
+                  <AgentLogs agentId={agent.id} />
+                </TabsContent>
+
+                <TabsContent value="config" className="mt-4">
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Agent Configuration</CardTitle>
+                      <CardDescription>Current settings for this trading agent</CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="rounded-lg border border-border p-4">
+                          <p className="text-sm font-medium text-muted-foreground">AI Model</p>
+                          <p className="text-foreground">{model?.name ?? "Unknown"}</p>
+                          <p className="text-xs text-muted-foreground">{model?.model}</p>
+                        </div>
+                        <div className="rounded-lg border border-border p-4">
+                          <p className="text-sm font-medium text-muted-foreground">Exchange</p>
+                          <p className="text-foreground">{exchange?.name ?? "Unknown"}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{exchange?.exchange}</p>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-border p-4">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">Indicators</p>
+                        <div className="flex flex-wrap gap-2">
+                          {indicators.map((ind: string) => (
+                            <Badge key={ind} variant="secondary">
+                              {ind}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="rounded-lg border border-border p-4">
+                        <p className="text-sm font-medium text-muted-foreground mb-2">System Prompt</p>
+                        <pre className="whitespace-pre-wrap rounded bg-secondary p-3 text-xs text-foreground font-mono">
+                          {(agent as any).prompt ?? ""}
+                        </pre>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+              </Tabs>
+            </div>
           </div>
-        </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </ProtectedRoute>
   )
 }

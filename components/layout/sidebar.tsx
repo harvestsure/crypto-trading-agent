@@ -1,11 +1,22 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { Bot, Building2, LayoutDashboard, Brain, Settings, Activity, Wifi, Server } from "lucide-react"
+import { Bot, Building2, LayoutDashboard, Brain, Settings, Activity, Wifi, Server, User, LogOut } from "lucide-react"
 import { useWebSocket } from "@/hooks/use-websocket"
+import { useAuth } from "@/contexts/auth-context"
 import { useEffect, useState } from "react"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 
 const navigation = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
@@ -18,7 +29,9 @@ const navigation = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
   const { status: wsStatus } = useWebSocket()
+  const { user, logout } = useAuth()
   const [backendStatus, setBackendStatus] = useState<"connected" | "disconnected" | "checking">("checking")
 
   useEffect(() => {
@@ -40,9 +53,22 @@ export function Sidebar() {
     }
 
     checkBackend()
-    const interval = setInterval(checkBackend, 10000) // Check every 10 seconds
+    const interval = setInterval(checkBackend, 10000)
     return () => clearInterval(interval)
   }, [])
+
+  const getUserInitials = () => {
+    if (!user) return "U"
+    if (user.full_name) {
+      const names = user.full_name.split(" ")
+      return names
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    }
+    return user.username.slice(0, 2).toUpperCase()
+  }
 
   return (
     <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
@@ -75,11 +101,50 @@ export function Sidebar() {
           })}
         </nav>
 
+        {user && (
+          <div className="border-t border-border p-4">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" className="w-full justify-start px-3 py-2 h-auto hover:bg-sidebar-accent">
+                  <div className="flex items-center gap-3 w-full">
+                    <Avatar className="h-9 w-9">
+                      <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                        {getUserInitials()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="flex-1 min-w-0 text-left">
+                      <p className="text-sm font-medium text-foreground truncate">{user.username}</p>
+                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                    </div>
+                  </div>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent side="top" align="start" className="w-56 mb-2">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col space-y-1">
+                    <p className="text-sm font-medium">{user.full_name || user.username}</p>
+                    <p className="text-xs text-muted-foreground">{user.email}</p>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => router.push("/profile")} className="cursor-pointer">
+                  <User className="mr-2 h-4 w-4" />
+                  View Profile
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={logout} className="cursor-pointer text-destructive focus:text-destructive">
+                  <LogOut className="mr-2 h-4 w-4" />
+                  Log out
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        )}
+
         <div className="border-t border-border p-4">
           <div className="rounded-lg bg-secondary/50 p-3 space-y-3">
             <p className="text-xs font-medium text-foreground">System Status</p>
 
-            {/* Backend Status */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Server className="h-4 w-4 text-muted-foreground" />
@@ -119,7 +184,6 @@ export function Sidebar() {
               </div>
             </div>
 
-            {/* WSS Feed Status */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Wifi className="h-4 w-4 text-muted-foreground" />

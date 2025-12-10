@@ -514,5 +514,3 @@ class Order:
         return (f"Order({self.exchange_id}/{self.symbol} {self.side.value} "
                 f"{self.filled_quantity:.2f}/{self.quantity:.2f} @ "
                 f"{self.average_price or self.price or 'N/A'} - {self.status.value})")
-    
-
