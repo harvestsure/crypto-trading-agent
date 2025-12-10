@@ -49,7 +49,7 @@ export function ConversationHistory({ messages }: ConversationHistoryProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <ScrollArea className="h-[400px] pr-4">
+        <ScrollArea className="pr-4">
           <div className="space-y-3">
             {messages.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-8">No conversation history yet</p>

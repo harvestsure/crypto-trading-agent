@@ -310,6 +310,12 @@ class SmartTradingAgent(BaseAgent):
         try:
             while True:
                 try:
+                    # 检查是否被暂停
+                    if self.status == AgentStatus.PAUSED:
+                        logger.info(f"Agent {self.name} is paused, skipping decision")
+                        await asyncio.sleep(5)  # 暂停时每5秒检查一次
+                        continue
+                    
                     # 执行一次决策
                     await self._make_decision()
                 except Exception as e:

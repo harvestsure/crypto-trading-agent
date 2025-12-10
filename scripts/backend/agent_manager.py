@@ -126,7 +126,7 @@ class AgentManager:
     
     async def start_agent(self, agent_id: str) -> bool:
         """
-        启动 Agent
+        启动或恢复 Agent
         
         Args:
             agent_id: Agent ID
@@ -142,8 +142,17 @@ class AgentManager:
             
             # 检查是否已经在运行
             if agent_id in self.agent_tasks and not self.agent_tasks[agent_id].done():
-                logger.warning(f"Agent {agent_id} is already running")
-                return True
+                # 如果是暂停状态，恢复运行
+                from agents.base_agent import AgentStatus
+                if agent.status == AgentStatus.PAUSED:
+                    agent.set_status(AgentStatus.IDLE, "Agent resumed by user")
+                    # 更新数据库状态
+                    AgentRepository.update(agent_id, {'status': 'running'})
+                    logger.info(f"✅ Agent {agent.name} ({agent_id}) resumed from pause")
+                    return True
+                else:
+                    logger.warning(f"Agent {agent_id} is already running")
+                    return True
             
             # 初始化 Agent
             await agent.initialize()
@@ -170,13 +179,13 @@ class AgentManager:
     
     async def stop_agent(self, agent_id: str) -> bool:
         """
-        停止 Agent
+        暂停 Agent（不完全停止，只是暂停决策循环）
         
         Args:
             agent_id: Agent ID
         
         Returns:
-            是否成功停止
+            是否成功暂停
         """
         try:
             agent = self.agents.get(agent_id)
@@ -184,27 +193,16 @@ class AgentManager:
                 logger.error(f"Agent {agent_id} not found")
                 return False
             
-            # 停止运行任务
-            if agent_id in self.agent_tasks:
-                task = self.agent_tasks[agent_id]
-                if not task.done():
-                    task.cancel()
-                    try:
-                        await task
-                    except asyncio.CancelledError:
-                        pass
-                del self.agent_tasks[agent_id]
-            
-            # 清理 Agent
-            await agent.cleanup()
+            # 设置 Agent 状态为 PAUSED（决策循环会检查此状态）
+            from agents.base_agent import AgentStatus
+            agent.set_status(AgentStatus.PAUSED, "Agent paused by user")
             
             # 更新数据库状态
             AgentRepository.update(agent_id, {
-                'status': 'stopped',
-                'stopped_at': datetime.utcnow().isoformat()
+                'status': 'paused'
             })
             
-            logger.info(f"✅ Agent {agent.name} ({agent_id}) stopped")
+            logger.info(f"✅ Agent {agent.name} ({agent_id}) paused")
             return True
             
         except Exception as e:

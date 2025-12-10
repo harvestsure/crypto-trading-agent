@@ -12,7 +12,7 @@ from enum import Enum
 from abc import ABC, abstractmethod
 from uuid import uuid4
 from pydantic import BaseModel
-from common.data_types import DataEvent, DataEventType, Order
+from common.data_types import STR_STATUS, DataEvent, DataEventType, Order, OrderStatus, OrderType
 import pandas as pd
 
 

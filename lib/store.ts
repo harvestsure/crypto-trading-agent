@@ -1,34 +1,15 @@
 import { create } from "zustand"
 import * as api from "@/lib/api"
 import { toast } from "sonner"
+import type { TradingAgent, AIModel, Exchange } from "@/lib/types"
 
 interface AppState {
   // Collections
-  models: Array<{
-    id: string
-    name: string
-    provider?: string
-    model?: string
-    status?: string
-  }>
+  models: AIModel[]
 
-  exchanges: Array<{
-    id: string
-    name: string
-    exchange?: string
-    status?: string
-  }>
+  exchanges: Exchange[]
 
-  agents: Array<{
-    id: string
-    name: string
-    modelId: string
-    exchangeId: string
-    symbol?: string
-    timeframe?: string
-    status?: string
-    performance?: { total_trades?: number; win_rate?: number; pnl?: number }
-  }>
+  agents: TradingAgent[]
 
   // Fetchers
   fetchModels: () => Promise<void>
@@ -76,8 +57,6 @@ interface AppState {
     prompt: string
   }) => Promise<{ success: boolean; error?: string }>
 
-  updateAgent: (id: string, data: { status?: string }) => Promise<{ success: boolean; error?: string }>
-
   deleteAgent: (id: string) => Promise<{ success: boolean; error?: string }>
 
   startAgent: (id: string) => Promise<{ success: boolean; error?: string }>
@@ -103,13 +82,14 @@ export const useAppStore = create<AppState>()((set) => ({
     const list = Array.isArray(payload) ? payload : ((payload as any).models ?? [])
     if (!Array.isArray(list)) return
     set({
-      models: list.map((m: any) => ({
-        id: m.id,
-        name: m.name,
-        provider: m.provider,
-        model: m.model,
-        status: m.status,
-      })),
+      models: (list
+        .map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          provider: m.provider,
+          model: m.model,
+          status: m.status,
+        })) as any) as AIModel[],
     })
   },
   fetchExchanges: async () => {
@@ -122,7 +102,9 @@ export const useAppStore = create<AppState>()((set) => ({
     if (!payload) return
     const list = Array.isArray(payload) ? payload : ((payload as any).exchanges ?? [])
     if (!Array.isArray(list)) return
-    set({ exchanges: list.map((e: any) => ({ id: e.id, name: e.name, exchange: e.exchange, status: e.status })) })
+    set({
+      exchanges: (list.map((e: any) => ({ id: e.id, name: e.name, exchange: e.exchange, status: e.status })) as any) as Exchange[],
+    })
   },
   fetchAgents: async () => {
     const result = await api.getAgents()
@@ -282,16 +264,6 @@ export const useAppStore = create<AppState>()((set) => ({
       toast.error("Failed to create agent", { description: error })
       return { success: false, error }
     }
-  },
-
-  updateAgent: async (id, data) => {
-    const result = await api.updateAgent(id, data)
-    if (result.error) {
-      toast.error("Failed to update agent", { description: result.error })
-      return { success: false, error: result.error }
-    }
-    toast.success("Agent updated successfully")
-    return { success: true }
   },
 
   deleteAgent: async (id) => {

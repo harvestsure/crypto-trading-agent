@@ -163,7 +163,11 @@ function normalizeAgent(data: any) {
 
 export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const router = useRouter()
-  const { agents, models, exchanges, updateAgent } = useAppStore()
+  const agents = useAppStore((state) => state.agents)
+  const models = useAppStore((state) => state.models)
+  const exchanges = useAppStore((state) => state.exchanges)
+
+  console.log("[DEBUG] AgentDetailClient render, agents count:", agents.length, "agent id:", id)
 
   // Try to get agent from store first, then fetch from API
   const storeAgent = agents.find((a) => a.id === id)
@@ -178,6 +182,17 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   )
 
   const agent = storeAgent ? normalizeAgent(storeAgent) : apiAgent
+  console.log("[DEBUG] Current agent status:", agent?.status)
+
+  // Sync apiAgent to store if agent was fetched from API
+  useEffect(() => {
+    if (apiAgent && !storeAgent) {
+      console.log("[DEBUG] Syncing apiAgent to store:", apiAgent)
+      useAppStore.setState((state) => ({
+        agents: [...state.agents, apiAgent],
+      }))
+    }
+  }, [apiAgent, storeAgent, id])
 
   const model = models.find((m) => m.id === agent?.modelId)
   const exchange = exchanges.find((e) => e.id === agent?.exchangeId)
@@ -235,23 +250,56 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
     if (!agent) return
 
     const isRunning = agent.status === "running"
+    const newStatus = isRunning ? "paused" : "running"
 
+    console.log("[DEBUG] handleToggle called, isRunning:", isRunning, "newStatus:", newStatus)
+
+    // Update store immediately for responsiveness
+    useAppStore.setState((state) => ({
+      agents: state.agents.map((a) =>
+        a.id === agent.id ? { ...a, status: newStatus } : a
+      ),
+    }))
+    
+    console.log("[DEBUG] Store updated, new agents:", useAppStore.getState().agents)
+
+    // Call API to actually start/stop the agent
     if (backendConnected) {
       try {
         if (isRunning) {
-          await stopAgent(agent.id)
+          const result = await stopAgent(agent.id)
+          if (result.error) {
+            console.error("[v0] Failed to stop agent:", result.error)
+            // Revert on error
+            useAppStore.setState((state) => ({
+              agents: state.agents.map((a) =>
+                a.id === agent.id ? { ...a, status: "running" } : a
+              ),
+            }))
+          }
         } else {
-          await startAgent(agent.id)
+          const result = await startAgent(agent.id)
+          if (result.error) {
+            console.error("[v0] Failed to start agent:", result.error)
+            // Revert on error
+            useAppStore.setState((state) => ({
+              agents: state.agents.map((a) =>
+                a.id === agent.id ? { ...a, status: "paused" } : a
+              ),
+            }))
+          }
         }
       } catch (error) {
         console.error("[v0] Failed to toggle agent:", error)
+        // Revert on error
+        useAppStore.setState((state) => ({
+          agents: state.agents.map((a) =>
+            a.id === agent.id ? { ...a, status: isRunning ? "running" : "paused" } : a
+          ),
+        }))
       }
     }
-
-    updateAgent(agent.id, {
-      status: isRunning ? "paused" : "running",
-    })
-  }, [agent, backendConnected, updateAgent])
+  }, [agent, backendConnected])
 
   const handleTriggerAnalysis = useCallback(async () => {
     if (!agent || !backendConnected) return

@@ -44,50 +44,55 @@ export function ProfitChart({ data, title = "Profit & Loss" }: ProfitChartProps)
       <CardContent>
         <div className="h-[250px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <AreaChart data={data} margin={{ top: 10, right: 10, left: 45, bottom: 20 }}>
               <defs>
                 <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0} />
+                  <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.1} />
                 </linearGradient>
                 <linearGradient id="lossGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.3} />
-                  <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0} />
+                  <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.4} />
+                  <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.1} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" opacity={0.4} />
               <XAxis
                 dataKey="timestamp"
                 tickFormatter={formatDate}
                 stroke="hsl(var(--muted-foreground))"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
+                fontSize={12}
+                tick={{ fill: "hsl(var(--muted-foreground))" }}
+                tickLine={{ stroke: "hsl(var(--muted))" }}
+                axisLine={{ stroke: "hsl(var(--muted))" }}
               />
               <YAxis
                 tickFormatter={(v) => `${v}%`}
                 stroke="hsl(var(--muted-foreground))"
-                fontSize={11}
-                tickLine={false}
-                axisLine={false}
+                fontSize={12}
+                tick={{ fill: "hsl(var(--muted-foreground))" }}
+                tickLine={{ stroke: "hsl(var(--muted))" }}
+                axisLine={{ stroke: "hsl(var(--muted))" }}
               />
               <Tooltip
                 formatter={(value: number) => [formatTooltip(value), "PnL"]}
                 labelFormatter={(label) => formatDate(label as number)}
                 contentStyle={{
                   backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
+                  border: "2px solid hsl(var(--primary))",
                   borderRadius: "8px",
                   fontSize: "12px",
+                  color: "hsl(var(--foreground))",
+                  boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
                 }}
               />
-              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="3 3" />
+              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" strokeOpacity={0.6} />
               <Area
                 type="monotone"
                 dataKey="pnlPercent"
                 stroke={isProfitable ? "hsl(var(--success))" : "hsl(var(--destructive))"}
-                strokeWidth={2}
+                strokeWidth={3}
                 fill={isProfitable ? "url(#profitGradient)" : "url(#lossGradient)"}
+                isAnimationActive={false}
               />
             </AreaChart>
           </ResponsiveContainer>

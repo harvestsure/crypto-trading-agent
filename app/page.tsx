@@ -13,7 +13,7 @@ import { Card } from "@/components/ui/card"
 import { Toaster } from "sonner"
 
 function DashboardContent() {
-  const { models, exchanges, agents, updateAgent, deleteAgent, fetchModels, fetchExchanges, fetchAgents } =
+  const { models, exchanges, agents, startAgent, stopAgent, deleteAgent, fetchModels, fetchExchanges, fetchAgents } =
     useAppStore()
   const { user } = useAuth()
 
@@ -30,11 +30,12 @@ function DashboardContent() {
   const handleToggleAgent = async (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId)
     if (agent) {
-      const newStatus = agent.status === "running" ? "paused" : "running"
-      const result = await updateAgent(agentId, { status: newStatus })
-      if (result.success) {
-        fetchAgents()
+      if (agent.status === "running") {
+        await stopAgent(agentId)
+      } else {
+        await startAgent(agentId)
       }
+      fetchAgents()
     }
   }
 
