@@ -264,14 +264,14 @@ export default function ActivityPage() {
                       key={activity.id}
                       className="flex gap-4 rounded-lg border border-border p-4 transition-colors hover:bg-secondary/30"
                     >
-                      <div className="flex-shrink-0 pt-0.5">{getEventIcon(activity)}</div>
+                      <div className="shrink-0 pt-0.5">{getEventIcon(activity)}</div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <p className="font-medium text-foreground">{activity.title}</p>
                             <p className="text-sm text-muted-foreground">{activity.description}</p>
                           </div>
-                          <span className="flex-shrink-0 text-xs text-muted-foreground">
+                          <span className="shrink-0 text-xs text-muted-foreground">
                             {formatTime(activity.timestamp)}
                           </span>
                         </div>

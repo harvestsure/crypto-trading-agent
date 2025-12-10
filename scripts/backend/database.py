@@ -91,14 +91,14 @@ def init_database():
             )
         """)
         
-        # Agents table
+        # Agents table (store `symbols` as JSON array string)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS agents (
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 model_id TEXT NOT NULL,
                 exchange_id TEXT NOT NULL,
-                symbol TEXT NOT NULL,
+                symbols TEXT NOT NULL,
                 timeframe TEXT NOT NULL,
                 indicators TEXT NOT NULL,
                 prompt TEXT NOT NULL,
@@ -394,8 +394,9 @@ class AgentRepository:
         with get_db() as conn:
             cursor = conn.cursor()
             indicators = json.dumps(agent_data.get('indicators', []))
+            symbols_json = json.dumps(agent_data.get('symbols', []))
             cursor.execute("""
-                INSERT INTO agents (id, name, model_id, exchange_id, symbol, timeframe, indicators, prompt, 
+                INSERT INTO agents (id, name, model_id, exchange_id, symbols, timeframe, indicators, prompt, 
                                    max_position_size, risk_per_trade, default_leverage, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
@@ -403,7 +404,7 @@ class AgentRepository:
                 agent_data['name'],
                 agent_data['model_id'],
                 agent_data['exchange_id'],
-                agent_data['symbol'],
+                symbols_json,
                 agent_data['timeframe'],
                 indicators,
                 agent_data['prompt'],
@@ -422,7 +423,16 @@ class AgentRepository:
             row = cursor.fetchone()
             if row:
                 data = dict(row)
-                data['indicators'] = json.loads(data['indicators'])
+                # parse json fields
+                try:
+                    data['indicators'] = json.loads(data.get('indicators') or '[]')
+                except Exception:
+                    data['indicators'] = []
+                try:
+                    data['symbols'] = json.loads(data.get('symbols') or '[]')
+                except Exception:
+                    # fallback for older rows that might still have 'symbol' column
+                    data['symbols'] = []
                 return data
             return None
     
@@ -434,7 +444,14 @@ class AgentRepository:
             results = []
             for row in cursor.fetchall():
                 data = dict(row)
-                data['indicators'] = json.loads(data['indicators'])
+                try:
+                    data['indicators'] = json.loads(data.get('indicators') or '[]')
+                except Exception:
+                    data['indicators'] = []
+                try:
+                    data['symbols'] = json.loads(data.get('symbols') or '[]')
+                except Exception:
+                    data['symbols'] = [data.get('symbol')] if data.get('symbol') else []
                 results.append(data)
             return results
     
@@ -447,6 +464,8 @@ class AgentRepository:
             for key, value in data.items():
                 if key != 'id':
                     if key == 'indicators':
+                        value = json.dumps(value)
+                    if key == 'symbols':
                         value = json.dumps(value)
                     fields.append(f"{key} = ?")
                     values.append(value)

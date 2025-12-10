@@ -44,7 +44,7 @@ class AgentManager:
         name: str,
         model_id: str,
         exchange_id: str,
-        symbol: str,
+        symbols: list,
         timeframe: str,
         indicators: list,
         prompt: str,
@@ -58,7 +58,7 @@ class AgentManager:
             name: Agent 名称
             model_id: LLM 模型 ID
             exchange_id: 交易所 ID
-            symbol: 交易对
+            symbols: 交易对列表
             timeframe: 时间框架
             indicators: 技术指标列表
             prompt: 系统提示词
@@ -93,8 +93,9 @@ class AgentManager:
             # 4. 创建工具注册表
             tool_registry = ToolRegistry()
             
-            # 5. 注册交易工具
-            trading_tools = create_trading_tools(exchange, symbol)
+            # 5. 注册交易工具 (使用第一个 symbol 作为主要订阅/工具参数)
+            primary_symbol = symbols[0] if symbols else None
+            trading_tools = create_trading_tools(exchange, primary_symbol)
             for tool in trading_tools:
                 tool_registry.register(tool)
             
@@ -105,7 +106,8 @@ class AgentManager:
                 agent_id=agent_id,
                 name=name,
                 exchange=exchange,
-                symbol=symbol,
+                symbol=primary_symbol,
+                symbols=symbols,
                 timeframe=timeframe,
                 indicators=indicators,
                 llm_model=llm_model,

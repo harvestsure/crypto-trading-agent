@@ -70,7 +70,7 @@ class AgentConfig(BaseModel):
     name: str
     model_id: str
     exchange_id: str
-    symbol: str
+    symbols: List[str]
     timeframe: str
     indicators: List[str]
     prompt: str
@@ -347,12 +347,13 @@ async def lifespan(app: FastAPI):
                         'decision_interval': 60
                     }
                     
+                    symbols = agent.get('symbols') if agent.get('symbols') else ([agent.get('symbol')] if agent.get('symbol') else [])
                     await agent_manager.create_agent(
                         agent_id=agent['id'],
                         name=agent['name'],
                         model_id=agent['model_id'],
                         exchange_id=agent['exchange_id'],
-                        symbol=agent['symbol'],
+                        symbols=symbols,
                         timeframe=agent['timeframe'],
                         indicators=agent['indicators'],
                         prompt=agent['prompt'],
@@ -804,7 +805,7 @@ async def create_agent(config: AgentConfig):
         'name': config.name,
         'model_id': config.model_id,
         'exchange_id': config.exchange_id,
-        'symbol': config.symbol,
+        'symbols': config.symbols,
         'timeframe': config.timeframe,
         'indicators': config.indicators,
         'prompt': config.prompt,
@@ -829,7 +830,7 @@ async def create_agent(config: AgentConfig):
             name=config.name,
             model_id=config.model_id,
             exchange_id=config.exchange_id,
-            symbol=config.symbol,
+            symbols=config.symbols,
             timeframe=config.timeframe,
             indicators=config.indicators,
             prompt=config.prompt,
@@ -862,13 +863,14 @@ async def start_agent(agent_id: str):
             'default_leverage': agent.get('default_leverage', 1),
             'decision_interval': 60
         }
-        
+        # agent['symbols'] stored as list
+        symbols = agent.get('symbols') if agent.get('symbols') else []
         await agent_manager.create_agent(
             agent_id=agent_id,
             name=agent['name'],
             model_id=agent['model_id'],
             exchange_id=agent['exchange_id'],
-            symbol=agent['symbol'],
+            symbols=symbols,
             timeframe=agent['timeframe'],
             indicators=agent['indicators'],
             prompt=agent['prompt'],
@@ -928,7 +930,8 @@ async def get_agent_positions(agent_id: str):
     if exchange:
         try:
             if hasattr(exchange, 'fetch_positions'):
-                live_positions = await exchange.fetch_positions([agent['symbol']])
+                symbols = agent.get('symbols') if agent.get('symbols') else []
+                live_positions = await exchange.fetch_positions(symbols)
                 if live_positions:
                     return [p for p in live_positions if float(p.get('contracts', 0)) != 0]
         except Exception as e:
@@ -1192,7 +1195,8 @@ async def run_agent_loop(agent_id: str):
                 break
             
             exchange_id = agent['exchange_id']
-            symbol = agent['symbol']
+            symbols = agent.get('symbols') if agent.get('symbols') else []
+            symbol = symbols[0] if symbols else None
             timeframe = agent['timeframe']
             
             # 获取交易所实例

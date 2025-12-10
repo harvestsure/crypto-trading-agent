@@ -131,6 +131,7 @@ class SmartTradingAgent(BaseAgent):
         name: str,
         exchange: CommonExchange,
         symbol: str,
+        symbols: Optional[List[str]],
         timeframe: str,
         indicators: List[str],
         llm_model: LLMModel,
@@ -141,7 +142,9 @@ class SmartTradingAgent(BaseAgent):
         super().__init__(agent_id, name)
         
         self.exchange = exchange
-        self.symbol = symbol
+        # support multiple symbols; keep primary symbol for backward compatibility
+        self.symbols = symbols or ([symbol] if symbol else [])
+        self.symbol = self.symbols[0] if self.symbols else symbol
         self.timeframe = timeframe
         self.indicators = indicators
         self.llm_model = llm_model
@@ -182,7 +185,7 @@ class SmartTradingAgent(BaseAgent):
         self.min_decision_interval = self.config.get('min_decision_interval', 120)  # 最小决策间隔(秒)
         self.lock = asyncio.Lock()
         
-        logger.info(f"SmartTradingAgent {self.name} initialized for {symbol} @ {timeframe}")
+        logger.info(f"SmartTradingAgent {self.name} initialized for {self.symbol} (symbols={self.symbols}) @ {timeframe}")
     
     async def _on_initialize(self):
         """初始化 Agent"""

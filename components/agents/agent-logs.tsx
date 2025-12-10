@@ -135,8 +135,8 @@ export function AgentLogs({ agentId }: AgentLogsProps) {
         <div className="h-[400px] overflow-y-auto rounded-lg bg-secondary/50 p-4 font-mono text-xs">
           {logs.map((log) => (
             <div key={log.id} className="flex gap-3 py-1">
-              <span className="text-muted-foreground flex-shrink-0">{log.timestamp.toLocaleTimeString()}</span>
-              <Badge variant="outline" className={cn("h-5 px-1.5 text-[10px] flex-shrink-0", getLevelColor(log.level))}>
+              <span className="text-muted-foreground shrink-0">{log.timestamp.toLocaleTimeString()}</span>
+              <Badge variant="outline" className={cn("h-5 px-1.5 text-[10px] shrink-0", getLevelColor(log.level))}>
                 {log.level.toUpperCase()}
               </Badge>
               <span className="text-foreground">{log.message}</span>
