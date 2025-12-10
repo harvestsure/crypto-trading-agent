@@ -142,7 +142,10 @@ export const useAppStore = create<AppState>()((set) => ({
         exchangeId: a.exchange_id,
         symbol: a.symbol,
         timeframe: a.timeframe,
+        indicators: a.indicators || [],
+        prompt: a.prompt || "",
         status: a.status,
+        createdAt: a.created_at ? new Date(a.created_at) : new Date(),
         performance: a.performance,
       })),
     })

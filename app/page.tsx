@@ -52,7 +52,7 @@ function DashboardContent() {
         <Header
           title={`Welcome, ${user?.username || "Trader"}`}
           description="Overview of your trading agents and performance"
-          showCreateAgent={true}
+          showCreateAgent={false}
         />
 
         <div className="p-6 space-y-6 max-w-[1800px]">

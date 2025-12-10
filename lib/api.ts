@@ -21,13 +21,15 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}, retries 
       const timeoutId = setTimeout(() => controller.abort(), 30000) // 30s timeout
 
       const token = authAPI.getToken()
-      const headers: HeadersInit = {
-        "Content-Type": "application/json",
-        ...options.headers,
+
+      // Normalize headers into a Headers instance so we can safely use .set()
+      const headers = new Headers(options.headers as HeadersInit)
+      if (!headers.has("Content-Type")) {
+        headers.set("Content-Type", "application/json")
       }
 
       if (token) {
-        headers["Authorization"] = `Bearer ${token}`
+        headers.set("Authorization", `Bearer ${token}`)
       }
 
       const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -45,7 +47,13 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}, retries 
         lastError = error.detail || `HTTP ${response.status}`
 
         if (response.status === 401) {
-          authAPI.clearToken()
+          try {
+            await authAPI.logout()
+          } catch (e) {
+            // If logout fails, ensure we still attempt to clear local state via fallback
+            console.warn("authAPI.logout() failed:", e)
+          }
+
           if (typeof window !== "undefined") {
             window.location.href = "/login"
           }

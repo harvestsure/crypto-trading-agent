@@ -94,7 +94,7 @@ export default function RegisterPage() {
   const strength = passwordStrength(formData.password)
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-background via-background to-muted/30 p-4">
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-background via-background to-muted/30 p-4">
       <Card className="w-full max-w-md shadow-lg border-border/50">
         <CardHeader className="space-y-1 text-center">
           <div className="flex justify-center mb-4">
