@@ -146,6 +146,26 @@ interface AgentDetailClientProps {
 // Normalize agent data from API or store
 function normalizeAgent(data: any) {
   if (!data) return null
+  // Ensure we return a full TradingAgent-shaped object so updates to the store
+  // keep types consistent (notably `createdAt` is required on `TradingAgent`).
+  const createdAt = data.createdAt ?? data.created_at ? new Date(data.created_at ?? data.createdAt) : new Date()
+  const performance = data.performance
+    ? {
+        totalTrades: data.performance.totalTrades ?? data.performance.total_trades ?? 0,
+        winRate: data.performance.winRate ?? data.performance.win_rate ?? 0,
+        pnl: data.performance.pnl ?? 0,
+      }
+    : undefined
+
+  const lastSignal = data.lastSignal ?? data.last_signal
+  const normalizedLastSignal = lastSignal
+    ? {
+        action: lastSignal.action,
+        timestamp: lastSignal.timestamp ? new Date(lastSignal.timestamp) : new Date(lastSignal.ts ?? Date.now()),
+        reason: lastSignal.reason ?? lastSignal.msg ?? "",
+      }
+    : undefined
+
   return {
     id: data.id,
     name: data.name,
@@ -153,11 +173,12 @@ function normalizeAgent(data: any) {
     exchangeId: data.exchangeId || data.exchange_id,
     symbol: data.symbol,
     timeframe: data.timeframe,
-    status: data.status,
+    status: data.status ?? "paused",
     indicators: data.indicators || [],
-    prompt: data.prompt,
-    performance: data.performance,
-    lastSignal: data.lastSignal,
+    prompt: data.prompt || "",
+    performance,
+    lastSignal: normalizedLastSignal,
+    createdAt,
   }
 }
 
