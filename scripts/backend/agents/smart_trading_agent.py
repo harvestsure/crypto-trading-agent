@@ -153,10 +153,7 @@ class SmartTradingAgent(BaseAgent):
         self.current_orderbook: Optional[Dict] = None
         self.current_positions: List[Dict] = []
         self.current_balance: Dict[str, Any] = {}
-        
-        # 订阅任务
-        self.subscription_tasks: List[asyncio.Task] = []
-        
+
         # 决策循环任务
         self.decision_loop_task: Optional[asyncio.Task] = None
         
