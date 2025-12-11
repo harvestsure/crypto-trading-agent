@@ -15,11 +15,17 @@ logger = logging.getLogger(__name__)
 class OpenLongTool(BaseTool):
     """开多仓工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="open_long",
             description="开立多头仓位。当市场看涨时使用此工具建立多仓。",
             parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                ),
                 ToolParameter(
                     name="amount",
                     type="number",
@@ -57,10 +63,10 @@ class OpenLongTool(BaseTool):
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """执行开多仓操作"""
+        symbol = kwargs.get('symbol')
         amount = kwargs.get('amount')
         price = kwargs.get('price')
         leverage = kwargs.get('leverage', 1)
@@ -70,7 +76,7 @@ class OpenLongTool(BaseTool):
         try:
             # 设置杠杆
             if leverage > 1:
-                await self.exchange.set_leverage(self.symbol, leverage)
+                await self.exchange.set_leverage(symbol, leverage)
             
             # 确定订单类型
             order_type = OrderType.LIMIT if price else OrderType.MARKET
@@ -84,7 +90,7 @@ class OpenLongTool(BaseTool):
             
             # 创建订单
             order = await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=order_type,
                 side=OrderSide.BUY,
                 amount=amount,
@@ -100,7 +106,7 @@ class OpenLongTool(BaseTool):
                 "status": "success",
                 "action": "open_long",
                 "order_id": order_id,
-                "symbol": self.symbol,
+                "symbol": symbol,
                 "amount": amount,
                 "price": price or "market",
                 "leverage": leverage
@@ -108,11 +114,11 @@ class OpenLongTool(BaseTool):
             
             # 如果设置了止损止盈，创建条件订单
             if stop_loss:
-                await self._create_stop_loss(amount, stop_loss)
+                await self._create_stop_loss(symbol, amount, stop_loss)
                 result["stop_loss"] = stop_loss
             
             if take_profit:
-                await self._create_take_profit(amount, take_profit)
+                await self._create_take_profit(symbol, amount, take_profit)
                 result["take_profit"] = take_profit
             
             logger.info(f"✅ Opened long position: {result}")
@@ -122,7 +128,7 @@ class OpenLongTool(BaseTool):
             logger.error(f"❌ Error opening long position: {e}", exc_info=True)
             return f'{{"status": "error", "message": "{str(e)}"}}'
     
-    async def _create_stop_loss(self, amount: float, stop_price: float):
+    async def _create_stop_loss(self, symbol: str, amount: float, stop_price: float):
         """创建止损订单"""
         try:
             params = self.exchange.build_order_params(
@@ -133,7 +139,7 @@ class OpenLongTool(BaseTool):
             )
             
             await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=OrderType.STOP_MARKET,
                 side=OrderSide.SELL,
                 amount=amount,
@@ -143,7 +149,7 @@ class OpenLongTool(BaseTool):
         except Exception as e:
             logger.error(f"❌ Error creating stop loss: {e}")
     
-    async def _create_take_profit(self, amount: float, take_profit_price: float):
+    async def _create_take_profit(self, symbol: str, amount: float, take_profit_price: float):
         """创建止盈订单"""
         try:
             params = self.exchange.build_order_params(
@@ -154,7 +160,7 @@ class OpenLongTool(BaseTool):
             )
             
             await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=OrderType.TAKE_PROFIT_MARKET,
                 side=OrderSide.SELL,
                 amount=amount,
@@ -168,11 +174,17 @@ class OpenLongTool(BaseTool):
 class OpenShortTool(BaseTool):
     """开空仓工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="open_short",
             description="开立空头仓位。当市场看跌时使用此工具建立空仓。",
             parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                ),
                 ToolParameter(
                     name="amount",
                     type="number",
@@ -210,10 +222,10 @@ class OpenShortTool(BaseTool):
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """执行开空仓操作"""
+        symbol = kwargs.get('symbol')
         amount = kwargs.get('amount')
         price = kwargs.get('price')
         leverage = kwargs.get('leverage', 1)
@@ -223,7 +235,7 @@ class OpenShortTool(BaseTool):
         try:
             # 设置杠杆
             if leverage > 1:
-                await self.exchange.set_leverage(self.symbol, leverage)
+                await self.exchange.set_leverage(symbol, leverage)
             
             # 确定订单类型
             order_type = OrderType.LIMIT if price else OrderType.MARKET
@@ -237,7 +249,7 @@ class OpenShortTool(BaseTool):
             
             # 创建订单
             order = await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=order_type,
                 side=OrderSide.SELL,
                 amount=amount,
@@ -253,7 +265,7 @@ class OpenShortTool(BaseTool):
                 "status": "success",
                 "action": "open_short",
                 "order_id": order_id,
-                "symbol": self.symbol,
+                "symbol": symbol,
                 "amount": amount,
                 "price": price or "market",
                 "leverage": leverage
@@ -261,11 +273,11 @@ class OpenShortTool(BaseTool):
             
             # 如果设置了止损止盈，创建条件订单
             if stop_loss:
-                await self._create_stop_loss(amount, stop_loss)
+                await self._create_stop_loss(symbol, amount, stop_loss)
                 result["stop_loss"] = stop_loss
             
             if take_profit:
-                await self._create_take_profit(amount, take_profit)
+                await self._create_take_profit(symbol, amount, take_profit)
                 result["take_profit"] = take_profit
             
             logger.info(f"✅ Opened short position: {result}")
@@ -275,7 +287,7 @@ class OpenShortTool(BaseTool):
             logger.error(f"❌ Error opening short position: {e}", exc_info=True)
             return f'{{"status": "error", "message": "{str(e)}"}}'
     
-    async def _create_stop_loss(self, amount: float, stop_price: float):
+    async def _create_stop_loss(self, symbol: str, amount: float, stop_price: float):
         """创建止损订单"""
         try:
             params = self.exchange.build_order_params(
@@ -286,7 +298,7 @@ class OpenShortTool(BaseTool):
             )
             
             await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=OrderType.STOP_MARKET,
                 side=OrderSide.BUY,
                 amount=amount,
@@ -296,7 +308,7 @@ class OpenShortTool(BaseTool):
         except Exception as e:
             logger.error(f"❌ Error creating stop loss: {e}")
     
-    async def _create_take_profit(self, amount: float, take_profit_price: float):
+    async def _create_take_profit(self, symbol: str, amount: float, take_profit_price: float):
         """创建止盈订单"""
         try:
             params = self.exchange.build_order_params(
@@ -307,7 +319,7 @@ class OpenShortTool(BaseTool):
             )
             
             await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=OrderType.TAKE_PROFIT_MARKET,
                 side=OrderSide.BUY,
                 amount=amount,
@@ -321,11 +333,17 @@ class OpenShortTool(BaseTool):
 class ClosePositionTool(BaseTool):
     """平仓工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="close_position",
             description="平仓当前持仓。可以选择平多仓、平空仓或全部平仓。",
             parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                ),
                 ToolParameter(
                     name="side",
                     type="string",
@@ -351,17 +369,17 @@ class ClosePositionTool(BaseTool):
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """执行平仓操作"""
+        symbol = kwargs.get('symbol')
         side = kwargs.get('side')
         amount = kwargs.get('amount')
         price = kwargs.get('price')
         
         try:
             # 获取当前持仓
-            positions = await self.exchange.fetch_positions([self.symbol])
+            positions = await self.exchange.fetch_positions([symbol])
             
             results = []
             
@@ -387,7 +405,7 @@ class ClosePositionTool(BaseTool):
                     )
                     
                     order = await self.exchange.create_order(
-                        symbol=self.symbol,
+                        symbol=symbol,
                         order_type=order_type,
                         side=close_side,
                         amount=close_amount,
@@ -415,11 +433,17 @@ class ClosePositionTool(BaseTool):
 class SetStopLossTool(BaseTool):
     """设置止损工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="set_stop_loss",
             description="为现有持仓设置止损价格。价格触达时自动平仓止损。",
             parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                ),
                 ToolParameter(
                     name="side",
                     type="string",
@@ -445,17 +469,17 @@ class SetStopLossTool(BaseTool):
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """执行设置止损操作"""
+        symbol = kwargs.get('symbol')
         side = kwargs.get('side')
         stop_price = kwargs.get('stop_price')
         amount = kwargs.get('amount')
         
         try:
             # 获取当前持仓
-            positions = await self.exchange.fetch_positions([self.symbol])
+            positions = await self.exchange.fetch_positions([symbol])
             position = next((p for p in positions if p.get('side') == side), None)
             
             if not position or position.get('contracts', 0) == 0:
@@ -475,7 +499,7 @@ class SetStopLossTool(BaseTool):
             )
             
             order = await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=OrderType.STOP_MARKET,
                 side=close_side,
                 amount=stop_amount,
@@ -495,11 +519,17 @@ class SetStopLossTool(BaseTool):
 class SetTakeProfitTool(BaseTool):
     """设置止盈工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="set_take_profit",
             description="为现有持仓设置止盈价格。价格触达时自动平仓获利。",
             parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                ),
                 ToolParameter(
                     name="side",
                     type="string",
@@ -525,17 +555,17 @@ class SetTakeProfitTool(BaseTool):
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """执行设置止盈操作"""
+        symbol = kwargs.get('symbol')
         side = kwargs.get('side')
         take_profit_price = kwargs.get('take_profit_price')
         amount = kwargs.get('amount')
         
         try:
             # 获取当前持仓
-            positions = await self.exchange.fetch_positions([self.symbol])
+            positions = await self.exchange.fetch_positions([symbol])
             position = next((p for p in positions if p.get('side') == side), None)
             
             if not position or position.get('contracts', 0) == 0:
@@ -555,7 +585,7 @@ class SetTakeProfitTool(BaseTool):
             )
             
             order = await self.exchange.create_order(
-                symbol=self.symbol,
+                symbol=symbol,
                 order_type=OrderType.TAKE_PROFIT_MARKET,
                 side=close_side,
                 amount=tp_amount,
@@ -575,26 +605,33 @@ class SetTakeProfitTool(BaseTool):
 class GetMarketInfoTool(BaseTool):
     """获取市场信息工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="get_market_info",
             description="获取当前市场的详细信息，包括价格、成交量、24小时涨跌幅等。",
-            parameters=[],
+            parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                )
+            ],
             category="query",
             timeout=10
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """获取市场信息"""
+        symbol = kwargs.get('symbol')
         try:
-            ticker = await self.exchange.fetch_ticker(self.symbol)
+            ticker = await self.exchange.fetch_ticker(symbol)
             
             if ticker:
                 info = {
-                    "symbol": self.symbol,
+                    "symbol": symbol,
                     "last": ticker.get('last'),
                     "bid": ticker.get('bid'),
                     "ask": ticker.get('ask'),
@@ -615,11 +652,17 @@ class GetMarketInfoTool(BaseTool):
 class CancelOrdersTool(BaseTool):
     """取消订单工具"""
     
-    def __init__(self, exchange: CommonExchange, symbol: str):
+    def __init__(self, exchange: CommonExchange):
         definition = ToolDefinition(
             name="cancel_orders",
             description="取消指定的订单或取消所有未成交订单。",
             parameters=[
+                ToolParameter(
+                    name="symbol",
+                    type="string",
+                    description="交易对符号，例如 BTC/USDT",
+                    required=True
+                ),
                 ToolParameter(
                     name="order_id",
                     type="string",
@@ -632,31 +675,31 @@ class CancelOrdersTool(BaseTool):
         )
         super().__init__(definition)
         self.exchange = exchange
-        self.symbol = symbol
     
     async def execute(self, **kwargs) -> str:
         """执行取消订单操作"""
+        symbol = kwargs.get('symbol')
         order_id = kwargs.get('order_id')
         
         try:
             if order_id:
                 # 取消单个订单
-                result = await self.exchange.cancel_order(order_id, self.symbol)
+                result = await self.exchange.cancel_order(order_id, symbol)
                 if result:
                     return f'{{"status": "success", "action": "cancel_order", "order_id": "{order_id}"}}'
                 else:
                     return f'{{"status": "error", "message": "Failed to cancel order {order_id}"}}'
             else:
                 # 取消所有订单
-                result = await self.exchange.cancel_all_orders(self.symbol)
-                return f'{{"status": "success", "action": "cancel_all_orders", "symbol": "{self.symbol}"}}'
+                result = await self.exchange.cancel_all_orders(symbol)
+                return f'{{"status": "success", "action": "cancel_all_orders", "symbol": "{symbol}"}}'
             
         except Exception as e:
             logger.error(f"❌ Error canceling orders: {e}", exc_info=True)
             return f'{{"status": "error", "message": "{str(e)}"}}'
 
 
-def create_trading_tools(exchange: CommonExchange, symbol: str) -> List[BaseTool]:
+def create_trading_tools(exchange: CommonExchange) -> List[BaseTool]:
     """
     创建交易工具集
     
@@ -668,11 +711,11 @@ def create_trading_tools(exchange: CommonExchange, symbol: str) -> List[BaseTool
         交易工具列表
     """
     return [
-        OpenLongTool(exchange, symbol),
-        OpenShortTool(exchange, symbol),
-        ClosePositionTool(exchange, symbol),
-        SetStopLossTool(exchange, symbol),
-        SetTakeProfitTool(exchange, symbol),
-        GetMarketInfoTool(exchange, symbol),
-        CancelOrdersTool(exchange, symbol),
+        OpenLongTool(exchange),
+        OpenShortTool(exchange),
+        ClosePositionTool(exchange),
+        SetStopLossTool(exchange),
+        SetTakeProfitTool(exchange),
+        GetMarketInfoTool(exchange),
+        CancelOrdersTool(exchange),
     ]

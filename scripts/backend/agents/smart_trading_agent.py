@@ -9,12 +9,11 @@ import json
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
-from dataclasses import dataclass, asdict
-
+from dataclasses import dataclass
 import pandas as pd
 import pandas_ta as ta
-import numpy as np
 
+from symbol_tracker import SymbolTracker
 from agents.base_agent import BaseAgent, AgentStatus
 from models.llm_model import LLMModel
 from tools.tool_registry import ToolRegistry
@@ -130,8 +129,7 @@ class SmartTradingAgent(BaseAgent):
         agent_id: str,
         name: str,
         exchange: CommonExchange,
-        symbol: str,
-        symbols: Optional[List[str]],
+        symbols: List[str],
         timeframe: str,
         indicators: List[str],
         llm_model: LLMModel,
@@ -142,9 +140,7 @@ class SmartTradingAgent(BaseAgent):
         super().__init__(agent_id, name)
         
         self.exchange = exchange
-        # support multiple symbols; keep primary symbol for backward compatibility
-        self.symbols = symbols or ([symbol] if symbol else [])
-        self.symbol = self.symbols[0] if self.symbols else symbol
+        self.symbols = symbols
         self.timeframe = timeframe
         self.indicators = indicators
         self.llm_model = llm_model
@@ -184,11 +180,15 @@ class SmartTradingAgent(BaseAgent):
         self.last_decision_time = 0  # 上次决策时间
         self.min_decision_interval = self.config.get('min_decision_interval', 120)  # 最小决策间隔(秒)
         self.lock = asyncio.Lock()
-        
-        logger.info(f"SmartTradingAgent {self.name} initialized for {self.symbol} (symbols={self.symbols}) @ {timeframe}")
+        self.symbol_trackers: Dict[str, SymbolTracker] = {}
+
+        logger.info(f"SmartTradingAgent {self.name} initialized for (symbols={self.symbols}) @ {self.timeframe}")
     
     async def _on_initialize(self):
         """初始化 Agent"""
+
+        for symbol in self.symbols:
+            self.symbol_trackers[symbol] = SymbolTracker(self.exchange.exchange_id, symbol)
         # 1. 加载历史K线
         await self._load_historical_klines()
                
@@ -816,6 +816,18 @@ class SmartTradingAgent(BaseAgent):
                     logger.error(f"Tool {result['tool_name']} failed: {result.get('error')}")
         else:
             logger.info("No tool calls in LLM response")
+
+    async def on_data_event(self, event: DataEvent):
+        try:
+            symbol = event.symbol
+      
+            # 对于全局事件（如余额），分发到该交易所的所有策略
+            if symbol and symbol in self.symbols and symbol in self.symbol_trackers:
+                symbol_tracker = self.symbol_trackers[symbol]
+                if symbol_tracker:
+                    await symbol_tracker.on_data_event(event)                    
+        except Exception as e:
+            logging.error(f"处理数据事件失败: {e}", exc_info=False)
     
     def get_agent_info(self) -> Dict[str, Any]:
         """获取Agent信息"""

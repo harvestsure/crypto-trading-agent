@@ -93,9 +93,8 @@ class AgentManager:
             # 4. 创建工具注册表
             tool_registry = ToolRegistry()
             
-            # 5. 注册交易工具 (使用第一个 symbol 作为主要订阅/工具参数)
-            primary_symbol = symbols[0] if symbols else None
-            trading_tools = create_trading_tools(exchange, primary_symbol)
+            # 5. 注册交易工具
+            trading_tools = create_trading_tools(exchange)
             for tool in trading_tools:
                 tool_registry.register(tool)
             
@@ -106,7 +105,6 @@ class AgentManager:
                 agent_id=agent_id,
                 name=name,
                 exchange=exchange,
-                symbol=primary_symbol,
                 symbols=symbols,
                 timeframe=timeframe,
                 indicators=indicators,
@@ -403,7 +401,7 @@ class AgentManager:
             else:
                 # 分发到特定的策略实例
                 for agent in self.agents.values():
-                    if agent.exchange.exchange_id == exchange_id and agent.symbol == symbol:
+                    if agent.exchange.exchange_id == exchange_id and symbol in agent.symbols:
                         tasks.append(asyncio.create_task(agent.on_data_event(event)))
                                                     
             if tasks:
