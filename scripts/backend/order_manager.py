@@ -6,7 +6,6 @@ from collections import defaultdict
 import uuid
 from dataclasses import dataclass
 from risk_manager import RiskManager
-from shared_state import SharedState
 from exchange_manager import ExchangeManager
 from position_manager import PositionManager
 from common.data_types import Order, OrderAction, OrderType, OrderStatus, OrderSide, PositionSide
@@ -36,10 +35,9 @@ class SymbolGroup:
 class OrderManager:
     """多symbol订单管理器"""
     
-    def __init__(self, exchange_manager: ExchangeManager, risk_manager: RiskManager, shared_state: SharedState, position_manager: PositionManager):
+    def __init__(self, exchange_manager: ExchangeManager, risk_manager: RiskManager, position_manager: PositionManager):
         self.exchange_manager: ExchangeManager = exchange_manager
         self.risk_manager: RiskManager = risk_manager
-        self.shared_state: SharedState = shared_state
         self.position_manager: PositionManager = position_manager
 
         self.orders: Dict[str, Order] = {}  # 所有订单 order_id -> Order

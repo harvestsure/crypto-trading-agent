@@ -13,8 +13,8 @@ from dataclasses import dataclass
 import pandas as pd
 import pandas_ta as ta
 
-from symbol_tracker import SymbolTracker
-from agents.base_agent import BaseAgent, AgentStatus
+from trading_agents.symbol_tracker import SymbolTracker
+from trading_agents.base_agent import BaseAgent, AgentStatus
 from models.llm_model import LLMModel
 from tools.tool_registry import ToolRegistry
 from exchanges.common_exchange import CommonExchange

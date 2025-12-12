@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Optional, Any
 from datetime import datetime
 
-from agents.smart_trading_agent import SmartTradingAgent
+from trading_agents.smart_trading_agent import SmartTradingAgent
 from models.llm_model import LLMModel
 from common.data_types import DataEvent, DataEventType
 from tools.tool_registry import ToolRegistry
@@ -16,6 +16,8 @@ from tools.trading_tools import create_trading_tools
 from exchanges.common_exchange import CommonExchange
 from exchange_manager import ExchangeManager
 from database import AIModelRepository, AgentRepository
+from order_manager import OrderManager
+from position_manager import PositionManager
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +33,10 @@ class AgentManager:
     4. 提供 Agent 状态查询
     """
     
-    def __init__(self, exchange_manager: ExchangeManager):
-        self.exchange_manager = exchange_manager
+    def __init__(self, exchange_manager: ExchangeManager, order_manager: OrderManager = None, position_manager: PositionManager = None):
+        self.exchange_manager: ExchangeManager = exchange_manager
+        self.order_manager: OrderManager = order_manager
+        self.position_manager: PositionManager = position_manager
         self.agents: Dict[str, SmartTradingAgent] = {}
         self.agent_tasks: Dict[str, asyncio.Task] = {}
         

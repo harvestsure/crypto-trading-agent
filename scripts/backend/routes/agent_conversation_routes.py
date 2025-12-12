@@ -7,20 +7,26 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from agent_manager import AgentManager
+from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel
 
 from database import (
     AgentRepository,
     ConversationRepository,
     ToolCallRepository,
-    ActivityLogRepository,
     SignalRepository
 )
-from agent_manager import AgentManager
 
 logger = logging.getLogger(__name__)
+
+# 辅助函数：从 Request 中获取 agent_manager
+def get_agent_manager_from_request(request: Request)->AgentManager:
+    """从 FastAPI request 中获取 agent_manager"""
+    agent_manager = getattr(request.app.state, 'agent_manager', None)
+    if not agent_manager:
+        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+    return agent_manager
 
 
 # ============== Pydantic Models ==============
@@ -153,16 +159,12 @@ async def get_agent_signals(agent_id: str, limit: int = 50):
 
 
 @router.post("/{agent_id}/decision")
-async def trigger_manual_decision(agent_id: str, request: TriggerDecisionRequest):
+async def trigger_manual_decision(agent_id: str, request: TriggerDecisionRequest, http_request: Request):
     """手动触发Agent的决策（用于测试）"""
     if not request.agent_id == agent_id:
         raise HTTPException(status_code=400, detail="Agent ID mismatch")
     
-    from agent_manager import agent_manager
-    
-    if not agent_manager:
-        raise HTTPException(status_code=500, detail="Agent manager not initialized")
-    
+    agent_manager = get_agent_manager_from_request(http_request)
     agent = agent_manager.get_agent(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found or not initialized")
@@ -255,12 +257,9 @@ async def websocket_agent_stream(websocket: WebSocket, agent_id: str):
 # ============== Agent Status API ==============
 
 @router.get("/{agent_id}/status")
-async def get_agent_status(agent_id: str):
+async def get_agent_status(agent_id: str, request: Request):
     """获取Agent的实时状态"""
-    from agent_manager import agent_manager
-    
-    if not agent_manager:
-        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+    agent_manager = get_agent_manager_from_request(request)
     
     agent = agent_manager.get_agent(agent_id)
     if not agent:
@@ -279,12 +278,9 @@ async def get_agent_status(agent_id: str):
 
 
 @router.get("/{agent_id}/market-info")
-async def get_agent_market_info(agent_id: str):
+async def get_agent_market_info(agent_id: str, request: Request):
     """获取Agent当前的市场信息"""
-    from agent_manager import agent_manager
-    
-    if not agent_manager:
-        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+    agent_manager = get_agent_manager_from_request(request)
     
     agent = agent_manager.get_agent(agent_id)
     if not agent:
@@ -312,12 +308,9 @@ async def get_agent_market_info(agent_id: str):
 
 
 @router.get("/{agent_id}/indicators")
-async def get_agent_indicators(agent_id: str):
+async def get_agent_indicators(agent_id: str, request: Request):
     """获取Agent的技术指标"""
-    from agent_manager import agent_manager
-    
-    if not agent_manager:
-        raise HTTPException(status_code=500, detail="Agent manager not initialized")
+    agent_manager = get_agent_manager_from_request(request)
     
     agent = agent_manager.get_agent(agent_id)
     if not agent:
