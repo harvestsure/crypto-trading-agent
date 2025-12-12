@@ -8,6 +8,7 @@ import logging
 from typing import Dict, Optional, Any
 from datetime import datetime
 
+from trading_agents.base_agent import AgentStatus
 from trading_agents.smart_trading_agent import SmartTradingAgent
 from models.llm_model import LLMModel
 from common.data_types import DataEvent, DataEventType
@@ -117,6 +118,8 @@ class AgentManager:
                 system_prompt=prompt,
                 config=config or {}
             )
+
+            await self.exchange_manager.update_watched_symbols(active_symbols={exchange_id: symbols})
             
             # 7. 保存到管理器
             self.agents[agent_id] = agent
@@ -147,7 +150,6 @@ class AgentManager:
             # 检查是否已经在运行
             if agent_id in self.agent_tasks and not self.agent_tasks[agent_id].done():
                 # 如果是暂停状态，恢复运行
-                from agents.base_agent import AgentStatus
                 if agent.status == AgentStatus.PAUSED:
                     # Resume internal agent decision loop
                     try:
@@ -203,7 +205,6 @@ class AgentManager:
                 return False
             
             # 设置 Agent 状态为 PAUSED（决策循环会检查此状态）
-            from agents.base_agent import AgentStatus
             agent.set_status(AgentStatus.PAUSED, "Agent paused by user")
             # Cancel internal decision loop to actually pause activity
             try:
