@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation"
 import { CreateAgentModal } from "@/components/modals/create-agent-modal"
 import { useAppStore } from "@/lib/store"
 import { useAuth } from "@/contexts/auth-context"
+import { ThemeSwitcher } from "@/components/theme-switcher"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,6 +73,8 @@ export function Header({ title, description, showCreateAgent = false }: HeaderPr
               3
             </span>
           </Button>
+
+          <ThemeSwitcher />
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
