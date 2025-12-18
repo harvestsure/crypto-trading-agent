@@ -258,13 +258,13 @@ export function useAgentLogs(agentId: string, enabled = true) {
 }
 
 // Ticker data
-export function useTicker(exchangeId: string, symbol: string, enabled = true) {
+export function useTicker(agentId: string, symbol: string, enabled = true) {
   const { data, error, isLoading, mutate } = useSWR(
-    enabled && exchangeId && symbol ? `ticker-${exchangeId}-${symbol}` : null,
+    enabled && agentId && symbol ? `ticker-${agentId}-${symbol}` : null,
     async () => {
-      const result = await getTicker(exchangeId, symbol)
+      const result = await getTicker(agentId, symbol)
       if (result.error || !result.data) return null
-      return result.data.ticker
+      return result.data
     },
     { refreshInterval: 2000 },
   )

@@ -508,22 +508,14 @@ export async function placeOrder(order: {
 
 // ============== Market Data ==============
 
-export async function getTicker(exchangeId: string, symbol: string) {
-  return fetchApi<{
-    ticker: {
-      last: number
-      bid: number
-      ask: number
-      volume: number
-      change: number
-    }
-  }>(`/api/ticker/${exchangeId}/${encodeURIComponent(symbol)}`)
+export async function getTicker(agentId: string, symbol: string) {
+  // Backend returns the ticker object directly (not wrapped in { ticker: ... })
+  return fetchApi<any>(`/api/agents/${agentId}/ticker/${encodeURIComponent(symbol)}`)
 }
 
-export async function getKlines(exchangeId: string, symbol: string, timeframe: string, limit = 100) {
-  return fetchApi<{
-    klines: Array<[number, number, number, number, number, number]>
-  }>(`/api/klines/${exchangeId}/${encodeURIComponent(symbol)}/${timeframe}?limit=${limit}`)
+export async function getKlines(agentId: string, symbol: string, timeframe: string, limit = 100) {
+  const sym = encodeURIComponent(symbol)
+  return fetchApi<any>(`/api/agents/${agentId}/klines/${sym}/${timeframe}?limit=${limit}`)
 }
 
 export async function getIndicators(exchangeId: string, symbol: string, timeframe: string, indicators: string[]) {

@@ -15,13 +15,15 @@ from database import (
 )
 from logger_config import get_logger
 from common.models import AgentConfig
+from exchange_manager import ExchangeManager
+from agent_manager import AgentManager
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 logger = get_logger(__name__)
 
 # These will be injected from the app
-agent_manager = None
-exchange_manager = None
+agent_manager: AgentManager = None
+exchange_manager: ExchangeManager = None
 
 
 def set_managers(am, em):
@@ -271,3 +273,59 @@ async def get_agent_profit_history(agent_id: str, days: int = 30):
 @router.get("/{agent_id}/logs")
 async def get_agent_logs(agent_id: str, limit: int = 100):
     return ActivityLogRepository.get_recent(limit, agent_id)
+
+
+@router.get("/{agent_id}/ticker/{symbol:path}")
+async def get_agent_ticker(agent_id: str, symbol: str):
+    """
+    Get ticker data for a specific symbol using the agent's exchange
+    Symbol should be in format like BTC/USDT or BTC-USDT (will be converted to BTC/USDT)
+    """
+    agent = AgentRepository.get_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    exchange = exchange_manager.get_exchange(agent['exchange_id'])
+    if not exchange:
+        raise HTTPException(status_code=404, detail="Exchange not connected")
+    
+    # Convert symbol format: BTC-USDT -> BTC/USDT
+    if '-' in symbol and '/' not in symbol:
+        symbol = symbol.replace('-', '/')
+    
+    try:
+        ticker = await exchange.fetch_ticker(symbol)
+        return ticker
+    except Exception as e:
+        logger.error(f"Error fetching ticker for {symbol}: {e}")
+        raise HTTPException(status_code=404, detail="Ticker not available")
+
+
+@router.get("/{agent_id}/klines/{symbol:path}/{timeframe}")
+async def get_agent_klines(agent_id: str, symbol: str, timeframe: str, limit: int = 100):
+    """
+    Get klines (OHLCV) for the agent's exchange. Accepts optional `symbol` query param
+    If `symbol` omitted, use the agent's configured primary symbol.
+    """
+    agent = AgentRepository.get_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    exchange = exchange_manager.get_exchange(agent['exchange_id'])
+    if not exchange:
+        raise HTTPException(status_code=404, detail="Exchange not connected")
+
+    use_symbol = symbol
+    if not use_symbol:
+        raise HTTPException(status_code=400, detail="No symbol specified for klines")
+
+    # Normalize symbol passed with - as separator (keep / in symbol if present)
+    if '-' in use_symbol and '/' not in use_symbol:
+        use_symbol = use_symbol.replace('-', '/')
+
+    try:
+        klines = await exchange.fetch_ohlcv(use_symbol, timeframe, limit=limit)
+        return klines
+    except Exception as e:
+        logger.error(f"Error fetching klines for agent {agent_id}: {e}")
+        return []

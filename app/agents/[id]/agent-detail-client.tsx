@@ -48,6 +48,8 @@ import {
 import { startAgent, stopAgent, triggerAnalysis, getAgent } from "@/lib/api"
 import type { Position, AccountBalance, ConversationMessage, ToolCall, ProfitDataPoint } from "@/lib/types"
 
+const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
+
 const mockPositions: Position[] = [
   {
     symbol: "BTC/USDT",
@@ -232,13 +234,22 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
 
   const { isConnected: backendConnected } = useBackendStatus()
 
+  const [selectedTimeframe, setSelectedTimeframe] = useState<string>(agent?.timeframe ?? "1h")
+
+  useEffect(() => {
+    // Sync selected timeframe when agent loads or changes
+    if (agent && agent.timeframe && agent.timeframe !== selectedTimeframe) {
+      setSelectedTimeframe(agent.timeframe)
+    }
+  }, [agent?.timeframe])
+
   // Real data hooks - only fetch when backend is connected
   const { positions: realPositions } = useAgentPositions(id, backendConnected && !!agent)
   const { balance: realBalance } = useAgentBalance(id, backendConnected && !!agent)
   const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
   const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected && !!agent)
   const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected && !!agent)
-  const { ticker } = useTicker(exchange?.id ?? "", agent?.symbols?.[0] ?? "", backendConnected && !!exchange && !!agent)
+  const { ticker } = useTicker(id, agent?.symbols?.[0] ?? "", backendConnected && !!agent)
 
   // Use real data when available, otherwise use mock data
   const positions = backendConnected && realPositions.length > 0 ? realPositions : mockPositions
@@ -249,24 +260,53 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const profitData = backendConnected && realProfitHistory.length > 0 ? realProfitHistory : mockProfitData
 
   // Price state
-  const [currentPrice, setCurrentPrice] = useState(43250.5)
-  const [priceChange, setPriceChange] = useState(2.35)
+  const [currentPrice, setCurrentPrice] = useState<number | null>(null)
+  const [priceChange, setPriceChange] = useState<number | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
 
   // Update price from ticker
   useEffect(() => {
-    if (ticker) {
-      setCurrentPrice(ticker.last)
-      setPriceChange(ticker.change)
+    if (!ticker) return
+
+    // Normalize last price
+    const last = Number(ticker.last ?? ticker.close ?? (ticker.info && (ticker.info.lastPrice || ticker.info.last_price)) ?? NaN)
+    if (!Number.isFinite(last)) return
+
+    const prev = currentPrice
+    // Prefer percentage field from ticker if available (ccxt uses 'percentage')
+    let pct: number | null = null
+    if (ticker.percentage != null) {
+      pct = Number(ticker.percentage)
+    } else if (ticker.change != null) {
+      // 'change' can be absolute price change; convert to percent if we have a previous price
+      const changeVal = Number(ticker.change)
+      if (Number.isFinite(changeVal) && prev && prev !== 0) {
+        pct = (changeVal / prev) * 100
+      }
+    } else if (prev && prev !== 0) {
+      pct = ((last - prev) / prev) * 100
     }
+
+    setCurrentPrice(last)
+    setPriceChange(Number.isFinite(pct ?? NaN) ? Math.round((pct as number) * 100) / 100 : null)
   }, [ticker])
 
   // Simulate price updates when not connected
   useEffect(() => {
     if (backendConnected) return
     const interval = setInterval(() => {
-      setCurrentPrice((prev) => Math.round((prev + (Math.random() - 0.5) * 100) * 100) / 100)
-      setPriceChange((prev) => Math.round((prev + (Math.random() - 0.5) * 0.5) * 100) / 100)
+      setCurrentPrice((prev) => {
+        const base = prev ?? 43250.5
+        const next = Math.round((base + (Math.random() - 0.5) * 100) * 100) / 100
+        // compute percent change relative to base price
+        if (base && base !== 0) {
+          const change = ((next - base) / base) * 100
+          setPriceChange(Math.round(change * 100) / 100)
+        } else {
+          setPriceChange(null)
+        }
+        return next
+      })
     }, 3000)
     return () => clearInterval(interval)
   }, [backendConnected])
@@ -439,20 +479,24 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm text-muted-foreground">Current Price</p>
-                      <p className="text-2xl font-bold text-foreground">${currentPrice.toLocaleString()}</p>
+                      <p className="text-2xl font-bold text-foreground">
+                        {currentPrice != null ? `$${currentPrice.toLocaleString()}` : "—"}
+                      </p>
                       <p
                         className={cn(
                           "flex items-center text-sm",
-                          priceChange >= 0 ? "text-success" : "text-destructive",
+                          priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground",
                         )}
                       >
-                        {priceChange >= 0 ? (
-                          <TrendingUp className="mr-1 h-3 w-3" />
-                        ) : (
-                          <TrendingDown className="mr-1 h-3 w-3" />
-                        )}
-                        {priceChange >= 0 ? "+" : ""}
-                        {priceChange.toFixed(2)}%
+                        {priceChange != null ? (
+                          priceChange >= 0 ? (
+                            <TrendingUp className="mr-1 h-3 w-3" />
+                          ) : (
+                            <TrendingDown className="mr-1 h-3 w-3" />
+                          )
+                        ) : null}
+                        {priceChange != null ? (priceChange >= 0 ? "+" : "") : ""}
+                        {priceChange != null ? `${priceChange.toFixed(2)}%` : "--"}
                       </p>
                     </div>
                     <Activity className="h-8 w-8 text-primary" />
@@ -540,12 +584,13 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                         </CardDescription>
                       </div>
                       <div className="flex gap-2">
-                        {["1m", "5m", "15m", "1h", "4h", "1d"].map((tf) => (
+                        {TIMEFRAMES.map((tf) => (
                           <Button
                             key={tf}
-                            variant={agent.timeframe === tf ? "default" : "ghost"}
+                            variant={selectedTimeframe === tf ? "default" : "ghost"}
                             size="sm"
                             className="h-7 px-2 text-xs"
+                            onClick={() => setSelectedTimeframe(tf)}
                           >
                             {tf}
                           </Button>
@@ -554,7 +599,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <KlineChart symbol={agent.symbols?.[0] ?? ""} timeframe={agent.timeframe ?? "1h"} />
+                    <KlineChart agentId={id} symbol={agent.symbols?.[0] ?? ""} timeframe={selectedTimeframe ?? (agent.timeframe ?? "1h")} />
                   </CardContent>
                 </Card>
                 <ProfitChart data={profitData} title="30-Day Performance" />

@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useEffect, useMemo } from "react"
+import { getKlines } from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 interface KlineChartProps {
+  agentId?: string
   symbol: string
   timeframe: string
 }
@@ -47,37 +49,52 @@ function generateMockKlines(count: number, basePrice: number): Candle[] {
   return klines
 }
 
-export function KlineChart({ symbol, timeframe }: KlineChartProps) {
+export function KlineChart({ agentId, symbol, timeframe }: KlineChartProps) {
   const [klines, setKlines] = useState<Candle[]>([])
   const [hoveredCandle, setHoveredCandle] = useState<Candle | null>(null)
 
   useEffect(() => {
-    // Initial data
-    const basePrice = symbol.includes("BTC") ? 43000 : symbol.includes("ETH") ? 2200 : 100
-    setKlines(generateMockKlines(50, basePrice))
+    let mounted = true
 
-    // Simulate real-time updates
-    const interval = setInterval(() => {
-      setKlines((prev) => {
-        if (prev.length === 0) return prev
-        const lastCandle = prev[prev.length - 1]
-        const volatility = lastCandle.close * 0.005
-        const newClose = lastCandle.close + (Math.random() - 0.5) * volatility
+    async function loadKlines() {
+      if (!symbol) {
+        // fallback to mock
+        const basePrice = symbol?.includes("BTC") ? 43000 : symbol?.includes("ETH") ? 2200 : 100
+        setKlines(generateMockKlines(50, basePrice))
+        return
+      }
 
-        // Update last candle
-        const updated = [...prev]
-        updated[updated.length - 1] = {
-          ...lastCandle,
-          close: newClose,
-          high: Math.max(lastCandle.high, newClose),
-          low: Math.min(lastCandle.low, newClose),
-        }
-        return updated
-      })
-    }, 2000)
+      const agentParam = (typeof window !== "undefined" && (window as any).__AGENT_ID__) || undefined
+      const result = await getKlines(agentId ?? (agentParam ?? ""), symbol, timeframe, 100)
+      if (!mounted) return
+      if (result.error || !result.data) {
+        const basePrice = symbol.includes("BTC") ? 43000 : symbol.includes("ETH") ? 2200 : 100
+        setKlines(generateMockKlines(50, basePrice))
+        return
+      }
 
-    return () => clearInterval(interval)
-  }, [symbol])
+      // Backend returns array of OHLCV arrays [ts, open, high, low, close, volume]
+      const data = result.data as Array<[number, number, number, number, number, number]>
+      const candles: Candle[] = data.map((d) => ({
+        timestamp: d[0],
+        open: d[1],
+        high: d[2],
+        low: d[3],
+        close: d[4],
+        volume: d[5],
+      }))
+      setKlines(candles)
+    }
+
+    loadKlines()
+
+    // Poll for updates
+    const interval = setInterval(loadKlines, 5000)
+    return () => {
+      mounted = false
+      clearInterval(interval)
+    }
+  }, [agentId, symbol, timeframe])
 
   const { minPrice, maxPrice, chartHeight, candleWidth } = useMemo(() => {
     if (klines.length === 0) return { minPrice: 0, maxPrice: 0, chartHeight: 300, candleWidth: 8 }
