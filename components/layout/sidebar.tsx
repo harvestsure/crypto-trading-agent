@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils"
 import { Bot, Building2, LayoutDashboard, Brain, Settings, Activity, Wifi, Server, User, LogOut } from "lucide-react"
 import { useWebSocket } from "@/hooks/use-websocket"
 import { useAuth } from "@/contexts/auth-context"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { useEffect, useState } from "react"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
@@ -32,6 +33,7 @@ export function Sidebar() {
   const router = useRouter()
   const { status: wsStatus } = useWebSocket()
   const { user, logout } = useAuth()
+  const { isOpen, toggle } = useSidebar()
   const [backendStatus, setBackendStatus] = useState<"connected" | "disconnected" | "checking">("checking")
 
   useEffect(() => {
@@ -71,16 +73,31 @@ export function Sidebar() {
   }
 
   return (
-    <aside className="fixed left-0 top-0 z-40 h-screen w-64 border-r border-border bg-sidebar">
+    <aside
+      className={cn(
+        "fixed left-0 top-0 z-40 h-screen border-r border-border bg-sidebar transition-all duration-300 ease-in-out",
+        isOpen ? "w-64" : "w-16",
+      )}
+    >
       <div className="flex h-full flex-col">
-        <div className="flex h-16 items-center gap-2 border-b border-border px-6">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
-            <Bot className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="text-lg font-semibold text-foreground">CryptoAgent</span>
+        <div className="flex h-16 items-center justify-between border-b border-border px-4">
+          {isOpen && (
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+                <Bot className="h-5 w-5 text-primary-foreground" />
+              </div>
+              <span className="text-lg font-semibold text-foreground">CryptoAgent</span>
+            </div>
+          )}
+          {!isOpen && (
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary">
+              <Bot className="h-5 w-5 text-primary-foreground" />
+            </div>
+          )}
+          {/* toggle moved to footer to avoid compressing logo when collapsed */}
         </div>
 
-        <nav className="flex-1 space-y-1 px-3 py-4">
+        <nav className="flex-1 space-y-1 px-2 py-4">
           {navigation.map((item) => {
             const isActive = pathname === item.href
             return (
@@ -88,34 +105,51 @@ export function Sidebar() {
                 key={item.name}
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                  "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors justify-center",
+                  isOpen && "justify-start",
                   isActive
                     ? "bg-sidebar-accent text-primary"
                     : "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground",
                 )}
+                title={!isOpen ? item.name : undefined}
               >
-                <item.icon className="h-5 w-5" />
-                {item.name}
+                  <item.icon className="h-5 w-5 shrink-0" />
+                  <span
+                    className={cn(
+                      "ml-2 truncate whitespace-nowrap",
+                      !isOpen && "sr-only",
+                    )}
+                  >
+                    {item.name}
+                  </span>
               </Link>
             )
           })}
         </nav>
 
         {user && (
-          <div className="border-t border-border p-4">
+          <div className="border-t border-border p-3">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="w-full justify-start px-3 py-2 h-auto hover:bg-sidebar-accent">
-                  <div className="flex items-center gap-3 w-full">
-                    <Avatar className="h-9 w-9">
+                <Button 
+                  variant="ghost" 
+                  className={cn(
+                    "h-auto hover:bg-sidebar-accent",
+                    isOpen ? "w-full justify-start px-3 py-2" : "w-full px-2 py-2 justify-center"
+                  )}
+                >
+                  <div className={cn("flex items-center gap-3", isOpen && "w-full")}>
+                    <Avatar className="h-8 w-8 shrink-0">
                       <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                         {getUserInitials()}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="flex-1 min-w-0 text-left">
-                      <p className="text-sm font-medium text-foreground truncate">{user.username}</p>
-                      <p className="text-xs text-muted-foreground truncate">{user.email}</p>
-                    </div>
+                    {isOpen && (
+                      <div className="flex-1 min-w-0 text-left">
+                        <p className="text-sm font-medium text-foreground truncate">{user.username}</p>
+                        <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                      </div>
+                    )}
                   </div>
                 </Button>
               </DropdownMenuTrigger>
@@ -141,14 +175,21 @@ export function Sidebar() {
           </div>
         )}
 
-        <div className="border-t border-border p-4">
-          <div className="rounded-lg bg-secondary/50 p-3 space-y-3">
-            <p className="text-xs font-medium text-foreground">System Status</p>
+        <div className="border-t border-border p-3">
+          <div className={cn("rounded-lg bg-secondary/50 p-2 space-y-2", isOpen ? "p-3 space-y-3" : "p-2")}>
+            {isOpen && <p className="text-xs font-medium text-foreground">System Status</p>}
 
-            <div className="flex items-center justify-between">
+            <div className={cn("flex items-center justify-between", !isOpen && "flex-col gap-2")}>
               <div className="flex items-center gap-2">
-                <Server className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">Backend</span>
+                <Server className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span
+                  className={cn(
+                    "ml-2 text-xs text-muted-foreground truncate whitespace-nowrap",
+                    !isOpen && "sr-only",
+                  )}
+                >
+                  Backend
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className={cn("relative flex h-2 w-2")}>
@@ -167,12 +208,13 @@ export function Sidebar() {
                 </span>
                 <span
                   className={cn(
-                    "text-xs",
+                    "ml-2 text-xs truncate whitespace-nowrap",
                     backendStatus === "connected"
                       ? "text-success"
                       : backendStatus === "disconnected"
                         ? "text-destructive"
                         : "text-warning",
+                    !isOpen && "sr-only",
                   )}
                 >
                   {backendStatus === "connected"
@@ -184,10 +226,12 @@ export function Sidebar() {
               </div>
             </div>
 
-            <div className="flex items-center justify-between">
+            <div className={cn("flex items-center justify-between", !isOpen && "flex-col gap-2")}> 
               <div className="flex items-center gap-2">
-                <Wifi className="h-4 w-4 text-muted-foreground" />
-                <span className="text-xs text-muted-foreground">WSS Feed</span>
+                <Wifi className="h-4 w-4 text-muted-foreground shrink-0" />
+                <span className={cn("ml-2 text-xs text-muted-foreground truncate whitespace-nowrap", !isOpen && "sr-only")}>
+                  WSS Feed
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="relative flex h-2 w-2">
@@ -204,12 +248,13 @@ export function Sidebar() {
                 </span>
                 <span
                   className={cn(
-                    "text-xs",
+                    "ml-2 text-xs truncate whitespace-nowrap",
                     wsStatus === "connected"
                       ? "text-success"
                       : wsStatus === "error"
                         ? "text-destructive"
                         : "text-muted-foreground",
+                    !isOpen && "sr-only",
                   )}
                 >
                   {wsStatus === "connected" ? "Active" : wsStatus === "error" ? "Error" : "Inactive"}
@@ -218,6 +263,7 @@ export function Sidebar() {
             </div>
           </div>
         </div>
+        {/* toggle moved to header; footer toggle removed */}
       </div>
     </aside>
   )

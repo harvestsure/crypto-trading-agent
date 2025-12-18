@@ -1,6 +1,6 @@
 "use client"
 
-import { Bell, Search, Plus, User, LogOut } from "lucide-react"
+import { Bell, Search, Plus, User, LogOut, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useState } from "react"
@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { useSidebar } from "@/contexts/sidebar-context"
 
 interface HeaderProps {
   title: string
@@ -26,6 +27,7 @@ interface HeaderProps {
 }
 
 export function Header({ title, description, showCreateAgent = false }: HeaderProps) {
+  const { isOpen, toggle } = useSidebar()
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const { fetchAgents } = useAppStore()
   const { user, logout } = useAuth()
@@ -51,9 +53,14 @@ export function Header({ title, description, showCreateAgent = false }: HeaderPr
   return (
     <>
       <header className="sticky top-0 z-30 flex h-16 items-center justify-between border-b border-border bg-background/95 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold text-foreground truncate">{title}</h1>
-          {description && <p className="text-sm text-muted-foreground truncate">{description}</p>}
+        <div className="flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={toggle} className="h-9 w-9">
+            {isOpen ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          </Button>
+          <div className="min-w-0 flex-1">
+            <h1 className="text-xl font-semibold text-foreground truncate">{title}</h1>
+            {description && <p className="text-sm text-muted-foreground truncate">{description}</p>}
+          </div>
         </div>
 
         <div className="flex items-center gap-3 ml-4">

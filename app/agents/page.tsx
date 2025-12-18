@@ -6,6 +6,7 @@ import { useAgents, useModels, useExchanges } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { CreateAgentModal } from "@/components/modals/create-agent-modal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
 export default function AgentsPage() {
+  const { isOpen } = useSidebar()
   const { agents, isLoading: agentsLoading, mutate } = useAgents()
   const { models, isLoading: modelsLoading } = useModels()
   const { exchanges, isLoading: exchangesLoading } = useExchanges()
@@ -58,7 +60,7 @@ export default function AgentsPage() {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 pl-64">
+      <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
         <Header title="Trading Agents" description="Create and manage your AI trading agents" />
 
         <div className="p-6">

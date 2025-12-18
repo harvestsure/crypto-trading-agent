@@ -5,6 +5,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { useAuth } from "@/contexts/auth-context"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -16,6 +17,7 @@ import { User, Mail, Calendar, Shield, LogOut, Save } from "lucide-react"
 import { toast } from "@/hooks/use-toast"
 
 function ProfileContent() {
+  const { isOpen } = useSidebar()
   const { user, logout } = useAuth()
   const [isEditing, setIsEditing] = useState(false)
   const [formData, setFormData] = useState({
@@ -51,7 +53,7 @@ function ProfileContent() {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 pl-64">
+      <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
         <Header title="Profile" description="Manage your account settings and preferences" />
 
         <div className="p-6 max-w-4xl">

@@ -92,7 +92,7 @@ export function SignalHistory({ agentId }: SignalHistoryProps) {
         <div className="space-y-4">
           {signals.map((signal) => (
             <div key={signal.id} className="flex gap-4 rounded-lg border border-border p-4">
-              <div className="flex-shrink-0 pt-1">{getSignalIcon(signal.action)}</div>
+              <div className="shrink-0 pt-1">{getSignalIcon(signal.action)}</div>
               <div className="flex-1 space-y-2">
                 <div className="flex items-center justify-between">
                   <Badge

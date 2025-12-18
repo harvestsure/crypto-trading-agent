@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -40,6 +41,7 @@ interface ActivityEvent {
 }
 
 export default function ActivityPage() {
+  const { isOpen } = useSidebar()
   const { agents } = useAppStore()
   const [activities, setActivities] = useState<ActivityEvent[]>([])
   const [filter, setFilter] = useState<string>("all")
@@ -177,7 +179,7 @@ export default function ActivityPage() {
     <ProtectedRoute>
       <div className="flex min-h-screen">
         <Sidebar />
-        <main className="flex-1 pl-64">
+        <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
           <Header title="Activity" description="Real-time activity log from all trading agents" />
 
           <div className="p-6">

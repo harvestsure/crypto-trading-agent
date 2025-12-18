@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { AuthProvider } from "@/contexts/auth-context"
 import { ThemeContextProvider } from "@/contexts/theme-context"
+import { SidebarProvider } from "@/contexts/sidebar-context"
 import { Toaster } from "@/components/ui/toaster"
 import "./globals.css"
 
@@ -26,8 +27,10 @@ export default function RootLayout({
       <body className={`font-sans antialiased`}>
         <ThemeContextProvider>
           <AuthProvider>
-            {children}
-            <Toaster />
+            <SidebarProvider>
+              {children}
+              <Toaster />
+            </SidebarProvider>
           </AuthProvider>
         </ThemeContextProvider>
         <Analytics />

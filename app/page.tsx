@@ -8,6 +8,7 @@ import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
 import { StatsCard } from "@/components/dashboard/stats-card"
 import { AgentCard } from "@/components/dashboard/agent-card"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { Bot, Brain, Building2, TrendingUp } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { Toaster } from "sonner"
@@ -16,6 +17,7 @@ function DashboardContent() {
   const { models, exchanges, agents, startAgent, stopAgent, deleteAgent, fetchModels, fetchExchanges, fetchAgents } =
     useAppStore()
   const { user } = useAuth()
+  const { isOpen } = useSidebar()
 
   useEffect(() => {
     console.log("[Dashboard] Mounted, user:", user?.username)
@@ -49,7 +51,7 @@ function DashboardContent() {
   return (
     <div className="flex min-h-screen bg-background">
       <Sidebar />
-      <main className="flex-1 pl-64">
+      <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
         <Header
           title={`Welcome, ${user?.username || "Trader"}`}
           description="Overview of your trading agents and performance"

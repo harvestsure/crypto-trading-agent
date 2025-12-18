@@ -7,6 +7,7 @@ import { ProtectedRoute } from "@/components/auth/protected-route"
 import { useAppStore } from "@/lib/store"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -175,6 +176,7 @@ function normalizeAgent(data: any) {
 
 export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const router = useRouter()
+  const { isOpen } = useSidebar()
   const agents = useAppStore((state) => state.agents)
   const models = useAppStore((state) => state.models)
   const exchanges = useAppStore((state) => state.exchanges)
@@ -373,7 +375,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
       return (
         <div className="flex min-h-screen">
           <Sidebar />
-          <main className="flex-1 pl-64">
+          <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
             <Header title="Loading..." />
             <div className="flex flex-col items-center justify-center p-12">
               <RefreshCw className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -387,7 +389,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
     return (
       <div className="flex min-h-screen">
         <Sidebar />
-        <main className="flex-1 pl-64">
+        <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
           <Header title="Agent Not Found" />
           <div className="flex flex-col items-center justify-center p-12">
             <p className="text-muted-foreground">The agent you are looking for does not exist.</p>
@@ -408,7 +410,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
     <ProtectedRoute>
       <div className="flex min-h-screen">
         <Sidebar />
-        <main className="flex-1 pl-64">
+        <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
           <Header title={agent.name} description={`${(agent.symbols ?? []).join(", ")} · ${agent.timeframe}`} />
 
           <div className="p-6">

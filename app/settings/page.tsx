@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/protected-route"
 import { Sidebar } from "@/components/layout/sidebar"
 import { Header } from "@/components/layout/header"
+import { useSidebar } from "@/contexts/sidebar-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,6 +18,7 @@ import { useWebSocket } from "@/hooks/use-websocket"
 import { cn } from "@/lib/utils"
 
 export default function SettingsPage() {
+  const { isOpen } = useSidebar()
   const [apiUrl, setApiUrl] = useState("http://localhost:8000")
   const [wsUrl, setWsUrl] = useState("ws://localhost:8000")
   const [apiStatus, setApiStatus] = useState<"checking" | "connected" | "error">("error")
@@ -57,7 +59,7 @@ export default function SettingsPage() {
     <ProtectedRoute>
       <div className="flex min-h-screen">
         <Sidebar />
-        <main className="flex-1 pl-64">
+        <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
           <Header title="Settings" description="Configure your trading system" />
 
           <div className="p-6">
