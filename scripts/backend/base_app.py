@@ -180,6 +180,11 @@ def create_app():
         app.state.exchange_manager = exchange_manager
         app.state.connection_manager = connection_manager
         
+        # Inject managers into route modules (after agent_manager is fully initialized)
+        agents_routes.set_managers(agent_manager, exchange_manager)
+        market_orders_routes.set_exchange_manager(exchange_manager)
+        health_routes.set_managers(agent_manager, connection_manager, exchange_manager)
+        
         yield
         
         # Cleanup
@@ -218,9 +223,7 @@ def create_app():
     
     # Inject managers into route modules
     exchanges_routes.set_exchange_manager(exchange_manager)
-    agents_routes.set_managers(agent_manager, exchange_manager)
-    market_orders_routes.set_exchange_manager(exchange_manager)
-    health_routes.set_managers(agent_manager, connection_manager, exchange_manager)
+    # Note: agents_routes, market_orders_routes, and health_routes managers are now set in lifespan after initialization
     websocket_routes.set_connection_manager(connection_manager)
     
     return app

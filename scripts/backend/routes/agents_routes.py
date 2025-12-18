@@ -51,31 +51,39 @@ async def create_agent(config: AgentConfig):
     if not agent_manager:
         raise HTTPException(status_code=500, detail="Agent manager not initialized")
     
-    agent_id = config.id or f"agent_{uuid.uuid4().hex[:8]}"
-    
-    # Save to database
-    agent_data = {
-        'id': agent_id,
-        'name': config.name,
-        'model_id': config.model_id,
-        'exchange_id': config.exchange_id,
-        'symbols': config.symbols,
-        'timeframe': config.timeframe,
-        'indicators': config.indicators,
-        'prompt': config.prompt,
-        'max_position_size': config.max_position_size,
-        'risk_per_trade': config.risk_per_trade,
-        'default_leverage': config.default_leverage,
-        'status': 'stopped'
-    }
-    result = AgentRepository.create(agent_data)
-    
-    # Create Agent instance
     try:
+        agent_id = config.id or f"agent_{uuid.uuid4().hex[:8]}"
+        
+        # Save to database
+        agent_data = {
+            'id': agent_id,
+            'name': config.name,
+            'model_id': config.model_id,
+            'exchange_id': config.exchange_id,
+            'symbols': config.symbols or [],
+            'timeframe': config.timeframe,
+            'indicators': config.indicators or [],
+            'prompt': config.prompt or '',
+            'max_position_size': config.max_position_size or 1000.0,
+            'risk_per_trade': config.risk_per_trade or 0.02,
+            'default_leverage': config.default_leverage or 1.0,
+            'status': 'stopped'
+        }
+        
+        try:
+            result = AgentRepository.create(agent_data)
+        except Exception as db_error:
+            logger.error(f"Database error while creating agent: {db_error}", exc_info=True)
+            raise Exception(f"Database error: {str(db_error)}")
+        
+        if not result:
+            raise Exception("Agent was created but could not be retrieved from database")
+        
+        # Create Agent instance
         agent_config = {
-            'max_position_size': config.max_position_size,
-            'risk_per_trade': config.risk_per_trade,
-            'default_leverage': config.default_leverage,
+            'max_position_size': config.max_position_size or 1000.0,
+            'risk_per_trade': config.risk_per_trade or 0.02,
+            'default_leverage': config.default_leverage or 1.0,
             'decision_interval': 60
         }
         
@@ -84,19 +92,27 @@ async def create_agent(config: AgentConfig):
             name=config.name,
             model_id=config.model_id,
             exchange_id=config.exchange_id,
-            symbols=config.symbols,
+            symbols=config.symbols or [],
             timeframe=config.timeframe,
-            indicators=config.indicators,
-            prompt=config.prompt,
+            indicators=config.indicators or [],
+            prompt=config.prompt or '',
             config=agent_config
         )
         
         ActivityLogRepository.log('info', f"Created agent: {config.name}", agent_id=agent_id)
+        logger.info(f"Agent created successfully: {agent_id}")
         return result
+    except HTTPException:
+        raise
     except Exception as e:
-        AgentRepository.delete(agent_id)
         logger.error(f"Failed to create agent: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+        # Try to clean up if agent was saved to database
+        try:
+            if 'agent_id' in locals():
+                AgentRepository.delete(agent_id)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to create agent: {str(e)}")
 
 
 @router.post("/{agent_id}/start")
@@ -187,6 +203,66 @@ async def get_agent_positions(agent_id: str):
     
     # Fallback to database positions
     return PositionRepository.get_open_by_agent(agent_id)
+
+
+@router.get("/{agent_id}/open-positions")
+async def get_agent_open_positions(agent_id: str):
+    """
+    Get open positions for a specific agent
+    """
+    agent = AgentRepository.get_by_id(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    
+    # Try to get live positions from exchange
+    exchange = exchange_manager.get_exchange(agent['exchange_id'])
+    if exchange:
+        try:
+            if hasattr(exchange, 'fetch_positions'):
+                symbols = agent.get('symbols') if agent.get('symbols') else []
+                live_positions = await exchange.fetch_positions(symbols)
+                if live_positions:
+                    # Filter open positions (non-zero contracts)
+                    open_positions = [
+                        {
+                            'symbol': p.get('symbol', ''),
+                            'side': p.get('side', 'long'),
+                            'size': float(p.get('contracts', 0)),
+                            'entryPrice': float(p.get('percentage', 0)),  # Entry price
+                            'currentPrice': float(p.get('markPrice', 0)) if p.get('markPrice') else 0,
+                            'leverage': int(p.get('leverage', 1)) if p.get('leverage') else 1,
+                            'unrealizedPnl': float(p.get('unrealizedPnl', 0)) if p.get('unrealizedPnl') else 0,
+                            'unrealizedPnlPercent': float(p.get('percentage', 0)) if p.get('percentage') else 0,
+                            'liquidationPrice': float(p.get('liquidationPrice', 0)) if p.get('liquidationPrice') else 0,
+                            'margin': float(p.get('collateral', 0)) if p.get('collateral') else 0,
+                            'timestamp': datetime.now().isoformat()
+                        }
+                        for p in live_positions 
+                        if float(p.get('contracts', 0)) != 0
+                    ]
+                    return {'positions': open_positions}
+        except Exception as e:
+            logger.error(f"Error fetching live open positions: {e}")
+    
+    # Fallback to database positions
+    db_positions = PositionRepository.get_open_by_agent(agent_id)
+    formatted_positions = [
+        {
+            'symbol': p.get('symbol', ''),
+            'side': p.get('side', 'long'),
+            'size': float(p.get('size', 0)),
+            'entryPrice': float(p.get('entry_price', 0)),
+            'currentPrice': float(p.get('current_price', 0)),
+            'leverage': int(p.get('leverage', 1)),
+            'unrealizedPnl': float(p.get('unrealized_pnl', 0)),
+            'unrealizedPnlPercent': float(p.get('unrealized_pnl_percent', 0)),
+            'liquidationPrice': float(p.get('liquidation_price', 0)),
+            'margin': float(p.get('margin', 0)),
+            'timestamp': p.get('timestamp', datetime.now().isoformat())
+        }
+        for p in db_positions
+    ]
+    return {'positions': formatted_positions}
 
 
 @router.get("/{agent_id}/balance")

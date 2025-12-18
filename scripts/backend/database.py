@@ -391,29 +391,39 @@ class ExchangeRepository:
 class AgentRepository:
     @staticmethod
     def create(agent_data: Dict[str, Any]) -> Dict[str, Any]:
-        with get_db() as conn:
-            cursor = conn.cursor()
-            indicators = json.dumps(agent_data.get('indicators', []))
-            symbols_json = json.dumps(agent_data.get('symbols', []))
-            cursor.execute("""
-                INSERT INTO agents (id, name, model_id, exchange_id, symbols, timeframe, indicators, prompt, 
-                                   max_position_size, risk_per_trade, default_leverage, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                agent_data['id'],
-                agent_data['name'],
-                agent_data['model_id'],
-                agent_data['exchange_id'],
-                symbols_json,
-                agent_data['timeframe'],
-                indicators,
-                agent_data['prompt'],
-                agent_data.get('max_position_size', 1000.0),
-                agent_data.get('risk_per_trade', 0.02),
-                agent_data.get('default_leverage', 1),
-                agent_data.get('status', 'stopped')
-            ))
-            return AgentRepository.get_by_id(agent_data['id'])
+        try:
+            with get_db() as conn:
+                cursor = conn.cursor()
+                indicators = json.dumps(agent_data.get('indicators', []))
+                symbols_json = json.dumps(agent_data.get('symbols', []))
+                cursor.execute("""
+                    INSERT INTO agents (id, name, model_id, exchange_id, symbols, timeframe, indicators, prompt, 
+                                       max_position_size, risk_per_trade, default_leverage, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    agent_data['id'],
+                    agent_data['name'],
+                    agent_data['model_id'],
+                    agent_data['exchange_id'],
+                    symbols_json,
+                    agent_data['timeframe'],
+                    indicators,
+                    agent_data.get('prompt', ''),
+                    agent_data.get('max_position_size', 1000.0),
+                    agent_data.get('risk_per_trade', 0.02),
+                    agent_data.get('default_leverage', 1),
+                    agent_data.get('status', 'stopped')
+                ))
+                conn.commit()
+                result = AgentRepository.get_by_id(agent_data['id'])
+                if not result:
+                    raise Exception(f"Failed to retrieve agent after insertion: {agent_data['id']}")
+                return result
+        except Exception as e:
+            from logger_config import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"Failed to create agent in database: {e}", exc_info=True)
+            raise
     
     @staticmethod
     def get_by_id(agent_id: str) -> Optional[Dict[str, Any]]:

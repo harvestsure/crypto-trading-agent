@@ -4,6 +4,7 @@ import useSWR from "swr"
 import {
   getAgent,
   getAgentPositions,
+  getOpenPositions,
   getAgentBalance,
   getAgentConversations,
   getAgentToolCalls,
@@ -297,6 +298,28 @@ export function useIndicators(
 
   return {
     indicators: data,
+    isLoading,
+    error,
+    refresh: mutate,
+  }
+}
+// Get open positions for a specific agent
+export function useOpenPositions(agentId: string, enabled = true) {
+  const { data, error, isLoading, mutate } = useSWR(
+    enabled && agentId ? `open-positions-${agentId}` : null,
+    async () => {
+      const result = await getOpenPositions(agentId)
+      if (result.error || !result.data) return []
+      return result.data.positions.map((p) => ({
+        ...p,
+        timestamp: new Date(p.timestamp),
+      })) as Position[]
+    },
+    { refreshInterval: 3000 },
+  )
+
+  return {
+    positions: data ?? [],
     isLoading,
     error,
     refresh: mutate,

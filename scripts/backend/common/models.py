@@ -58,11 +58,11 @@ class AgentConfig(BaseModel):
     exchange_id: str
     symbols: list[str]
     timeframe: str
-    indicators: list[str]
+    indicators: list[str] = []
     prompt: Optional[str] = None
-    max_position_size: float = 1000.0
-    risk_per_trade: float = 0.02
-    default_leverage: float = 1.0
+    max_position_size: Optional[float] = 1000.0
+    risk_per_trade: Optional[float] = 0.02
+    default_leverage: Optional[float] = 1.0
 
     class Config:
         json_schema_extra = {

@@ -255,7 +255,7 @@ export const useAppStore = create<AppState>()((set) => ({
         symbols: agent.symbols,
         timeframe: agent.timeframe,
         indicators: agent.indicators,
-        prompt: agent.prompt,
+        prompt: agent.prompt || "",
       })
       set({ isCreatingAgent: false })
       if (result.error) {

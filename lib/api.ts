@@ -324,14 +324,14 @@ export async function getAgent(agentId: string) {
 }
 
 export async function createAgent(agent: {
-  id: string
+  id?: string
   name: string
   model_id: string
   exchange_id: string
   symbols: string[]
   timeframe: string
   indicators: string[]
-  prompt: string
+  prompt?: string
   max_position_size?: number
   risk_per_trade?: number
   default_leverage?: number
@@ -481,6 +481,26 @@ export async function startAgent(agentId: string) {
 
 export async function stopAgent(agentId: string) {
   return fetchApi<{ status: string }>(`/api/agents/${agentId}/stop`, { method: "POST" })
+}
+
+// ============== Positions ==============
+
+export async function getOpenPositions(agentId: string) {
+  return fetchApi<{
+    positions: Array<{
+      symbol: string
+      side: "long" | "short"
+      size: number
+      entryPrice: number
+      currentPrice: number
+      leverage: number
+      unrealizedPnl: number
+      unrealizedPnlPercent: number
+      liquidationPrice: number
+      margin: number
+      timestamp: string
+    }>
+  }>(`/api/agents/${agentId}/open-positions`)
 }
 
 // ============== Orders ==============

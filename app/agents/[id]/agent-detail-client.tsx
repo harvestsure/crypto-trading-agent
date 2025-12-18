@@ -36,9 +36,11 @@ import { ToolOperations } from "@/components/agents/tool-operations"
 import { SignalHistory } from "@/components/agents/signal-history"
 import { OrdersTable } from "@/components/agents/orders-table"
 import { AgentLogs } from "@/components/agents/agent-logs"
+import { EditAgentModal } from "@/components/modals/edit-agent-modal"
 import {
   useBackendStatus,
   useAgentPositions,
+  useOpenPositions,
   useAgentBalance,
   useAgentConversations,
   useAgentToolCalls,
@@ -245,6 +247,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
 
   // Real data hooks - only fetch when backend is connected
   const { positions: realPositions } = useAgentPositions(id, backendConnected && !!agent)
+  const { positions: openPositions } = useOpenPositions(id, backendConnected && !!agent)
   const { balance: realBalance } = useAgentBalance(id, backendConnected && !!agent)
   const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
   const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected && !!agent)
@@ -252,17 +255,19 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { ticker } = useTicker(id, agent?.symbols?.[0] ?? "", backendConnected && !!agent)
 
   // Use real data when available, otherwise use mock data
-  const positions = backendConnected && realPositions.length > 0 ? realPositions : mockPositions
-  const balance = backendConnected && realBalance ? realBalance : mockBalance
-  const conversations = backendConnected && realConversations.length > 0 ? realConversations : mockConversations
-  const toolCalls = backendConnected && realToolCalls.length > 0 ? realToolCalls : mockToolCalls
+  // Prioritize openPositions (new endpoint), then fall back to realPositions, then mockPositions
+  const positions = openPositions.length > 0 ? openPositions : (realPositions.length > 0 ? realPositions : mockPositions)
+  const balance = realBalance ? realBalance : mockBalance
+  const conversations = realConversations.length > 0 ? realConversations : mockConversations
+  const toolCalls = realToolCalls.length > 0 ? realToolCalls : mockToolCalls
   const [mockProfitData] = useState<ProfitDataPoint[]>(generateMockProfitData())
-  const profitData = backendConnected && realProfitHistory.length > 0 ? realProfitHistory : mockProfitData
+  const profitData = realProfitHistory.length > 0 ? realProfitHistory : mockProfitData
 
   // Price state
   const [currentPrice, setCurrentPrice] = useState<number | null>(null)
   const [priceChange, setPriceChange] = useState<number | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   // Update price from ticker
   useEffect(() => {
@@ -455,7 +460,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                     Analyze Now
                   </Button>
                 )}
-                <Button variant="outline" size="icon">
+                <Button variant="outline" size="icon" onClick={() => setShowSettings(true)}>
                   <Settings className="h-4 w-4" />
                 </Button>
                 <Button onClick={handleToggle}>
@@ -690,6 +695,8 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
           </div>
         </main>
       </div>
+
+      <EditAgentModal open={showSettings} onOpenChange={setShowSettings} agent={agent} />
     </ProtectedRoute>
   )
 }
