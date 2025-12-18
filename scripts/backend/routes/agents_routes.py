@@ -17,6 +17,7 @@ from logger_config import get_logger
 from common.models import AgentConfig
 from exchange_manager import ExchangeManager
 from agent_manager import AgentManager
+import config
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 logger = get_logger(__name__)
@@ -183,28 +184,6 @@ async def delete_agent(agent_id: str):
         raise HTTPException(status_code=404, detail="Agent not found")
 
 
-@router.get("/{agent_id}/positions")
-async def get_agent_positions(agent_id: str):
-    agent = AgentRepository.get_by_id(agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-    
-    # Try to get live positions from exchange
-    exchange = exchange_manager.get_exchange(agent['exchange_id'])
-    if exchange:
-        try:
-            if hasattr(exchange, 'fetch_positions'):
-                symbols = agent.get('symbols') if agent.get('symbols') else []
-                live_positions = await exchange.fetch_positions(symbols)
-                if live_positions:
-                    return [p for p in live_positions if float(p.get('contracts', 0)) != 0]
-        except Exception as e:
-            logger.error(f"Error fetching live positions: {e}")
-    
-    # Fallback to database positions
-    return PositionRepository.get_open_by_agent(agent_id)
-
-
 @router.get("/{agent_id}/open-positions")
 async def get_agent_open_positions(agent_id: str):
     """
@@ -230,7 +209,7 @@ async def get_agent_open_positions(agent_id: str):
                             'size': float(p.get('contracts', 0)),
                             'entryPrice': float(p.get('percentage', 0)),  # Entry price
                             'currentPrice': float(p.get('markPrice', 0)) if p.get('markPrice') else 0,
-                            'leverage': int(p.get('leverage', 1)) if p.get('leverage') else 1,
+                            'leverage': int(p.get('leverage', 1)) if p.get('leverage') else exchange.config.get('defaultLeverage', 1),
                             'unrealizedPnl': float(p.get('unrealizedPnl', 0)) if p.get('unrealizedPnl') else 0,
                             'unrealizedPnlPercent': float(p.get('percentage', 0)) if p.get('percentage') else 0,
                             'liquidationPrice': float(p.get('liquidationPrice', 0)) if p.get('liquidationPrice') else 0,
@@ -253,7 +232,7 @@ async def get_agent_open_positions(agent_id: str):
             'size': float(p.get('size', 0)),
             'entryPrice': float(p.get('entry_price', 0)),
             'currentPrice': float(p.get('current_price', 0)),
-            'leverage': int(p.get('leverage', 1)),
+            'leverage': int(p.get('leverage', 1)) if p.get('leverage') else exchange.config.get('defaultLeverage', 1),
             'unrealizedPnl': float(p.get('unrealized_pnl', 0)),
             'unrealizedPnlPercent': float(p.get('unrealized_pnl_percent', 0)),
             'liquidationPrice': float(p.get('liquidation_price', 0)),

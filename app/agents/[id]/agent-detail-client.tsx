@@ -39,7 +39,6 @@ import { AgentLogs } from "@/components/agents/agent-logs"
 import { EditAgentModal } from "@/components/modals/edit-agent-modal"
 import {
   useBackendStatus,
-  useAgentPositions,
   useOpenPositions,
   useAgentBalance,
   useAgentConversations,
@@ -51,22 +50,6 @@ import { startAgent, stopAgent, triggerAnalysis, getAgent } from "@/lib/api"
 import type { Position, AccountBalance, ConversationMessage, ToolCall, ProfitDataPoint } from "@/lib/types"
 
 const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
-
-const mockPositions: Position[] = [
-  {
-    symbol: "BTC/USDT",
-    side: "long",
-    size: 0.5,
-    entryPrice: 42850,
-    currentPrice: 43250,
-    leverage: 10,
-    unrealizedPnl: 200,
-    unrealizedPnlPercent: 0.93,
-    liquidationPrice: 38565,
-    margin: 2142.5,
-    timestamp: new Date(),
-  },
-]
 
 const mockBalance: AccountBalance = {
   totalBalance: 52450.8,
@@ -246,7 +229,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   }, [agent?.timeframe])
 
   // Real data hooks - only fetch when backend is connected
-  const { positions: realPositions } = useAgentPositions(id, backendConnected && !!agent)
   const { positions: openPositions } = useOpenPositions(id, backendConnected && !!agent)
   const { balance: realBalance } = useAgentBalance(id, backendConnected && !!agent)
   const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
@@ -255,8 +237,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { ticker } = useTicker(id, agent?.symbols?.[0] ?? "", backendConnected && !!agent)
 
   // Use real data when available, otherwise use mock data
-  // Prioritize openPositions (new endpoint), then fall back to realPositions, then mockPositions
-  const positions = openPositions.length > 0 ? openPositions : (realPositions.length > 0 ? realPositions : mockPositions)
+  const positions = openPositions.length > 0 ? openPositions : []
   const balance = realBalance ? realBalance : mockBalance
   const conversations = realConversations.length > 0 ? realConversations : mockConversations
   const toolCalls = realToolCalls.length > 0 ? realToolCalls : mockToolCalls

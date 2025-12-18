@@ -6,6 +6,7 @@ import { TrendingUp, TrendingDown } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { ProfitDataPoint } from "@/lib/types"
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid, ReferenceLine } from "recharts"
+import { useTheme } from "next-themes"
 
 interface ProfitChartProps {
   data: ProfitDataPoint[]
@@ -13,6 +14,9 @@ interface ProfitChartProps {
 }
 
 export function ProfitChart({ data, title = "Profit & Loss" }: ProfitChartProps) {
+  const { resolvedTheme } = useTheme()
+  const isDark = resolvedTheme === "dark"
+  
   const latestPnl = data.length > 0 ? data[data.length - 1].pnlPercent : 0
   const isProfitable = latestPnl >= 0
 
@@ -22,6 +26,16 @@ export function ProfitChart({ data, title = "Profit & Loss" }: ProfitChartProps)
 
   const formatTooltip = (value: number) => {
     return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`
+  }
+
+  // 主题相关的颜色值
+  const chartColors = {
+    success: isDark ? "#b3ff00" : "#10b981",
+    destructive: isDark ? "#ff6b6b" : "#ef4444",
+    muted: isDark ? "#404040" : "#c7d2e0",
+    mutedForeground: isDark ? "#a3a3a3" : "#64748b",
+    card: isDark ? "#262626" : "#ffffff",
+    foreground: isDark ? "#f5f5f5" : "#1f2937",
   }
 
   return (
@@ -47,49 +61,49 @@ export function ProfitChart({ data, title = "Profit & Loss" }: ProfitChartProps)
             <AreaChart data={data} margin={{ top: 10, right: 10, left: 45, bottom: 20 }}>
               <defs>
                 <linearGradient id="profitGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--success))" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="hsl(var(--success))" stopOpacity={0.1} />
+                  <stop offset="5%" stopColor={chartColors.success} stopOpacity={0.4} />
+                  <stop offset="95%" stopColor={chartColors.success} stopOpacity={0.1} />
                 </linearGradient>
                 <linearGradient id="lossGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="hsl(var(--destructive))" stopOpacity={0.4} />
-                  <stop offset="95%" stopColor="hsl(var(--destructive))" stopOpacity={0.1} />
+                  <stop offset="5%" stopColor={chartColors.destructive} stopOpacity={0.4} />
+                  <stop offset="95%" stopColor={chartColors.destructive} stopOpacity={0.1} />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--muted))" opacity={0.4} />
+              <CartesianGrid strokeDasharray="3 3" stroke={chartColors.muted} opacity={0.4} />
               <XAxis
                 dataKey="timestamp"
                 tickFormatter={formatDate}
-                stroke="hsl(var(--muted-foreground))"
+                stroke={chartColors.mutedForeground}
                 fontSize={12}
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
-                tickLine={{ stroke: "hsl(var(--muted))" }}
-                axisLine={{ stroke: "hsl(var(--muted))" }}
+                tick={{ fill: chartColors.mutedForeground }}
+                tickLine={{ stroke: chartColors.muted }}
+                axisLine={{ stroke: chartColors.muted }}
               />
               <YAxis
                 tickFormatter={(v) => `${v}%`}
-                stroke="hsl(var(--muted-foreground))"
+                stroke={chartColors.mutedForeground}
                 fontSize={12}
-                tick={{ fill: "hsl(var(--muted-foreground))" }}
-                tickLine={{ stroke: "hsl(var(--muted))" }}
-                axisLine={{ stroke: "hsl(var(--muted))" }}
+                tick={{ fill: chartColors.mutedForeground }}
+                tickLine={{ stroke: chartColors.muted }}
+                axisLine={{ stroke: chartColors.muted }}
               />
               <Tooltip
                 formatter={(value: number) => [formatTooltip(value), "PnL"]}
                 labelFormatter={(label) => formatDate(label as number)}
                 contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "2px solid hsl(var(--primary))",
+                  backgroundColor: chartColors.card,
+                  border: `2px solid ${chartColors.success}`,
                   borderRadius: "8px",
                   fontSize: "12px",
-                  color: "hsl(var(--foreground))",
+                  color: chartColors.foreground,
                   boxShadow: "0 4px 12px rgba(0, 0, 0, 0.5)",
                 }}
               />
-              <ReferenceLine y={0} stroke="hsl(var(--muted-foreground))" strokeDasharray="5 5" strokeOpacity={0.6} />
+              <ReferenceLine y={0} stroke={chartColors.mutedForeground} strokeDasharray="5 5" strokeOpacity={0.6} />
               <Area
                 type="monotone"
                 dataKey="pnlPercent"
-                stroke={isProfitable ? "hsl(var(--success))" : "hsl(var(--destructive))"}
+                stroke={isProfitable ? chartColors.success : chartColors.destructive}
                 strokeWidth={3}
                 fill={isProfitable ? "url(#profitGradient)" : "url(#lossGradient)"}
                 isAnimationActive={false}

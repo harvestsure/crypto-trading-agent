@@ -77,29 +77,6 @@ export function useAgentStatus(agentId: string, enabled = true) {
   }
 }
 
-// Positions data
-export function useAgentPositions(agentId: string, enabled = true) {
-  const { data, error, isLoading, mutate } = useSWR(
-    enabled ? `agent-positions-${agentId}` : null,
-    async () => {
-      const result = await getAgentPositions(agentId)
-      if (result.error || !result.data) return []
-      return result.data.positions.map((p) => ({
-        ...p,
-        timestamp: new Date(p.timestamp),
-      })) as Position[]
-    },
-    { refreshInterval: 3000 },
-  )
-
-  return {
-    positions: data ?? [],
-    isLoading,
-    error,
-    refresh: mutate,
-  }
-}
-
 // Account balance
 export function useAgentBalance(agentId: string, enabled = true) {
   const { data, error, isLoading, mutate } = useSWR(
