@@ -10,6 +10,7 @@ import { Header } from "@/components/layout/header"
 import { useSidebar } from "@/contexts/sidebar-context"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -442,17 +443,18 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   {isRunning ? "Running" : agent.status}
                 </Badge>
                 {agent?.symbols && agent.symbols.length > 0 && (
-                  <select
-                    value={selectedSymbol}
-                    onChange={(e) => setSelectedSymbol(e.target.value)}
-                    className="text-sm rounded border border-border bg-background px-2 py-1"
-                  >
-                    {agent.symbols.map((s: string) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={selectedSymbol} onValueChange={(v) => setSelectedSymbol(v)}>
+                    <SelectTrigger size="sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {agent.symbols.map((s: string) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 )}
 
                 {backendConnected && (
@@ -588,9 +590,9 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   <CardHeader className="pb-2">
                     <div className="flex items-center justify-between">
                       <div>
-                        <CardTitle>{(agent.symbols ?? []).join(", ")}</CardTitle>
+                        <CardTitle>{selectedSymbol}</CardTitle>
                         <CardDescription>
-                          {exchange?.name ?? "Exchange"} · {agent.timeframe} timeframe
+                          {exchange?.name ?? "Exchange"} · {selectedTimeframe} timeframe
                         </CardDescription>
                       </div>
                       <div className="flex gap-2">
