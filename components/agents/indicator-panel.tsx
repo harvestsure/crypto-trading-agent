@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 
 interface IndicatorPanelProps {
   indicators: string[]
+  symbol?: string
 }
 
 interface IndicatorValue {
@@ -16,7 +17,7 @@ interface IndicatorValue {
   status: "bullish" | "bearish" | "neutral"
 }
 
-export function IndicatorPanel({ indicators }: IndicatorPanelProps) {
+export function IndicatorPanel({ indicators, symbol }: IndicatorPanelProps) {
   const [values, setValues] = useState<IndicatorValue[]>([])
 
   useEffect(() => {
@@ -111,12 +112,15 @@ export function IndicatorPanel({ indicators }: IndicatorPanelProps) {
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [indicators])
+  }, [indicators, symbol])
 
   return (
-    <Card className="h-full">
+    <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Technical Indicators</CardTitle>
+        <CardTitle className="text-base">
+          Technical Indicators
+          {symbol ? <span className="ml-2 text-xs text-muted-foreground">{symbol}</span> : null}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         {values.map((indicator) => (

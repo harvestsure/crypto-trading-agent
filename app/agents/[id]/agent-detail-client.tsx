@@ -222,6 +222,14 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { isConnected: backendConnected } = useBackendStatus()
 
   const [selectedTimeframe, setSelectedTimeframe] = useState<string>(agent?.timeframe ?? "1h")
+  const [selectedSymbol, setSelectedSymbol] = useState<string>(agent?.symbols?.[0] ?? "")
+
+  useEffect(() => {
+    // Default to the first symbol when agent loads or symbols change
+    if (agent?.symbols && agent.symbols.length > 0) {
+      setSelectedSymbol((s) => (s ? s : agent.symbols?.[0] ?? ""))
+    }
+  }, [agent?.symbols])
 
   useEffect(() => {
     // Sync selected timeframe when agent loads or changes
@@ -236,10 +244,10 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
   const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected && !!agent)
   const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected && !!agent)
-  const { ticker } = useTicker(id, agent?.symbols?.[0] ?? "", backendConnected && !!agent)
+  const { ticker } = useTicker(id, selectedSymbol ?? agent?.symbols?.[0] ?? "", backendConnected && !!agent)
 
   // Use real data when available, otherwise use mock data
-  const positions = openPositions.length > 0 ? openPositions : []
+  const positions = (openPositions.length > 0 ? openPositions : [])
   const balance = realBalance ? realBalance : mockBalance
   const conversations = realConversations.length > 0 ? realConversations : mockConversations
   const toolCalls = realToolCalls.length > 0 ? realToolCalls : mockToolCalls
@@ -433,6 +441,20 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                 >
                   {isRunning ? "Running" : agent.status}
                 </Badge>
+                {agent?.symbols && agent.symbols.length > 0 && (
+                  <select
+                    value={selectedSymbol}
+                    onChange={(e) => setSelectedSymbol(e.target.value)}
+                    className="text-sm rounded border border-border bg-background px-2 py-1"
+                  >
+                    {agent.symbols.map((s: string) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
                 {backendConnected && (
                   <Button variant="outline" size="sm" onClick={handleTriggerAnalysis} disabled={isAnalyzing}>
                     {isAnalyzing ? (
@@ -587,7 +609,11 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                     </div>
                   </CardHeader>
                   <CardContent>
-                    <KlineChart agentId={id} symbol={agent.symbols?.[0] ?? ""} timeframe={selectedTimeframe ?? (agent.timeframe ?? "1h")} />
+                    <KlineChart
+                      agentId={id}
+                      symbol={selectedSymbol ?? agent.symbols?.[0] ?? ""}
+                      timeframe={selectedTimeframe ?? (agent.timeframe ?? "1h")}
+                    />
                   </CardContent>
                 </Card>
                 <ProfitChart data={profitData} title="30-Day Performance" />
@@ -596,7 +622,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
               {/* Positions & Indicators Panel */}
               <div className="space-y-6">
                 <PositionPanel positions={positions} balance={balance} />
-                <IndicatorPanel indicators={indicators} />
+                <IndicatorPanel indicators={indicators} symbol={selectedSymbol} />
               </div>
 
               {/* AI Conversation & Tools */}
