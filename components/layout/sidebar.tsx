@@ -184,7 +184,7 @@ export function Sidebar() {
                 <Server className="h-4 w-4 text-muted-foreground shrink-0" />
                 <span
                   className={cn(
-                    "ml-2 text-xs text-muted-foreground truncate whitespace-nowrap",
+                    "text-xs text-muted-foreground truncate whitespace-nowrap",
                     !isOpen && "sr-only",
                   )}
                 >
@@ -208,7 +208,7 @@ export function Sidebar() {
                 </span>
                 <span
                   className={cn(
-                    "ml-2 text-xs truncate whitespace-nowrap",
+                    "text-xs truncate whitespace-nowrap",
                     backendStatus === "connected"
                       ? "text-success"
                       : backendStatus === "disconnected"
@@ -229,7 +229,7 @@ export function Sidebar() {
             <div className={cn("flex items-center justify-between", !isOpen && "flex-col gap-2")}> 
               <div className="flex items-center gap-2">
                 <Wifi className="h-4 w-4 text-muted-foreground shrink-0" />
-                <span className={cn("ml-2 text-xs text-muted-foreground truncate whitespace-nowrap", !isOpen && "sr-only")}>
+                <span className={cn("text-xs text-muted-foreground truncate whitespace-nowrap", !isOpen && "sr-only")}>
                   WSS Feed
                 </span>
               </div>
@@ -248,7 +248,7 @@ export function Sidebar() {
                 </span>
                 <span
                   className={cn(
-                    "ml-2 text-xs truncate whitespace-nowrap",
+                    "text-xs truncate whitespace-nowrap",
                     wsStatus === "connected"
                       ? "text-success"
                       : wsStatus === "error"
