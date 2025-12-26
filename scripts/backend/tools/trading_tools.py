@@ -716,6 +716,6 @@ def create_trading_tools(exchange: CommonExchange) -> List[BaseTool]:
         ClosePositionTool(exchange),
         SetStopLossTool(exchange),
         SetTakeProfitTool(exchange),
-        GetMarketInfoTool(exchange),
+        # GetMarketInfoTool(exchange),
         CancelOrdersTool(exchange),
     ]
