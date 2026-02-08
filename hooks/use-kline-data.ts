@@ -28,48 +28,51 @@ export function useKlineData(options: UseKlineDataOptions) {
    * Fetch initial kline data from API
    */
   const fetchKlines = useCallback(async () => {
+    if (!exchangeId || !symbol || !timeframe) {
+      console.log("[v0] Missing required parameters for kline fetch")
+      return
+    }
+
     try {
       setIsLoading(true)
       setError(null)
 
-      // In a real implementation, this would fetch from backend
-      // For now, generate mock data
-      const mockKlines: KlineData[] = []
-      const now = Date.now()
-      const timeframeMs = getTimeframeInMs(timeframe)
+      console.log("[v0] Fetching klines:", { exchangeId, symbol, timeframe, limit })
 
-      let basePrice = 43000 + Math.random() * 1000
+      const response = await fetch(
+        `/api/klines?exchangeId=${exchangeId}&symbol=${symbol}&timeframe=${timeframe}&limit=${limit}`
+      )
 
-      for (let i = limit - 1; i >= 0; i--) {
-        const timestamp = now - i * timeframeMs
-        const open = basePrice
-        const change = (Math.random() - 0.5) * 200
-        const close = open + change
-        const high = Math.max(open, close) + Math.random() * 50
-        const low = Math.min(open, close) - Math.random() * 50
-        const volume = 10 + Math.random() * 50
-
-        mockKlines.push({
-          timestamp,
-          open: Math.round(open * 100) / 100,
-          high: Math.round(high * 100) / 100,
-          low: Math.round(low * 100) / 100,
-          close: Math.round(close * 100) / 100,
-          volume: Math.round(volume * 100) / 100,
-        })
-
-        basePrice = close
+      if (!response.ok) {
+        throw new Error(`Failed to fetch klines: ${response.statusText}`)
       }
 
-      setKlines(mockKlines)
+      const data = await response.json()
+
+      if (data.error) {
+        throw new Error(data.error)
+      }
+
+      // Transform backend data to KlineData format
+      const klineData: KlineData[] = (data.klines || data).map((k: any) => ({
+        timestamp: k.timestamp || k.time || k[0],
+        open: parseFloat(k.open || k[1]),
+        high: parseFloat(k.high || k[2]),
+        low: parseFloat(k.low || k[3]),
+        close: parseFloat(k.close || k[4]),
+        volume: parseFloat(k.volume || k[5]),
+      }))
+
+      setKlines(klineData)
       setIsLoading(false)
+      console.log("[v0] Loaded", klineData.length, "klines from API")
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "Failed to fetch klines"
       setError(errorMessage)
       setIsLoading(false)
       console.error("[v0] Failed to fetch klines:", errorMessage)
     }
-  }, [symbol, timeframe, limit])
+  }, [exchangeId, symbol, timeframe, limit])
 
   /**
    * Subscribe to WebSocket kline updates
@@ -83,6 +86,19 @@ export function useKlineData(options: UseKlineDataOptions) {
     console.log("[v0] Subscribing to klines:", { exchangeId, symbol, timeframe })
     wsService.subscribeKline(exchangeId, symbol, timeframe)
     setIsLive(true)
+  }, [exchangeId, symbol, timeframe])
+
+  /**
+   * Unsubscribe from WebSocket kline updates
+   */
+  const unsubscribeFromKlines = useCallback(() => {
+    if (!wsService.isConnected) {
+      return
+    }
+
+    console.log("[v0] Unsubscribing from klines:", { exchangeId, symbol, timeframe })
+    wsService.unsubscribeKline(exchangeId, symbol, timeframe)
+    setIsLive(false)
   }, [exchangeId, symbol, timeframe])
 
   /**
@@ -160,6 +176,7 @@ export function useKlineData(options: UseKlineDataOptions) {
     lastUpdate: lastUpdateRef.current,
     refetch: fetchKlines,
     subscribe: subscribeToKlines,
+    unsubscribe: unsubscribeFromKlines,
   }
 }
 
