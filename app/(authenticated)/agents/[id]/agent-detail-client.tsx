@@ -27,14 +27,11 @@ import { cn } from "@/lib/utils"
 import { KlineChart } from "@/components/charts/kline-chart"
 import { IndicatorPanel } from "@/components/agents/indicator-panel"
 import { LiveIndicatorPanel } from "@/components/agents/live-indicator-panel"
-import { AIDecisionPanel } from "@/components/agents/ai-decision-panel"
 import { AITradingSummary } from "@/components/agents/ai-trading-summary"
-import { ActionHistory } from "@/components/agents/action-history"
 import { PositionPanel } from "@/components/agents/position-panel"
-import { SignalHistory } from "@/components/agents/signal-history"
-import { OrdersTable } from "@/components/agents/orders-table"
+import { TradingTimeline } from "@/components/agents/trading-timeline"
+import type { TimelineEvent } from "@/components/agents/trading-timeline"
 import { AgentLogs } from "@/components/agents/agent-logs"
-import { ToolOperations } from "@/components/agents/tool-operations"
 import { EditAgentModal } from "@/components/modals/edit-agent-modal"
 import { useAITrading } from "@/hooks/use-ai-trading"
 import { useKlineData } from "@/hooks/use-kline-data"
@@ -142,19 +139,19 @@ function normalizeAgent(data: any) {
   const createdAt = data.createdAt ?? data.created_at ? new Date(data.created_at ?? data.createdAt) : new Date()
   const performance = data.performance
     ? {
-        totalTrades: data.performance.totalTrades ?? data.performance.total_trades ?? 0,
-        winRate: data.performance.winRate ?? data.performance.win_rate ?? 0,
-        pnl: data.performance.pnl ?? 0,
-      }
+      totalTrades: data.performance.totalTrades ?? data.performance.total_trades ?? 0,
+      winRate: data.performance.winRate ?? data.performance.win_rate ?? 0,
+      pnl: data.performance.pnl ?? 0,
+    }
     : undefined
 
   const lastSignal = data.lastSignal ?? data.last_signal
   const normalizedLastSignal = lastSignal
     ? {
-        action: lastSignal.action,
-        timestamp: lastSignal.timestamp ? new Date(lastSignal.timestamp) : new Date(lastSignal.ts ?? Date.now()),
-        reason: lastSignal.reason ?? lastSignal.msg ?? "",
-      }
+      action: lastSignal.action,
+      timestamp: lastSignal.timestamp ? new Date(lastSignal.timestamp) : new Date(lastSignal.ts ?? Date.now()),
+      reason: lastSignal.reason ?? lastSignal.msg ?? "",
+    }
     : undefined
 
   return {
@@ -165,8 +162,8 @@ function normalizeAgent(data: any) {
     symbols: Array.isArray(data.symbols)
       ? data.symbols
       : data.symbol
-      ? [data.symbol]
-      : [],
+        ? [data.symbol]
+        : [],
     timeframe: data.timeframe,
     status: data.status ?? "paused",
     indicators: data.indicators || [],
@@ -262,7 +259,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showDetailDrawer, setShowDetailDrawer] = useState(false)
-  const [detailTab, setDetailTab] = useState("actions")
+  const [detailTab, setDetailTab] = useState("indicators")
 
   // Kline data hook
   const {
@@ -293,6 +290,24 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
     // Initialize with some mock data for demonstration
     return generateMockTradingActions(12, selectedSymbol ?? agent?.symbols?.[0])
   })
+
+  // Convert trading actions to timeline events
+  const timelineEvents: TimelineEvent[] = tradingActions.map((action) => ({
+    id: action.id,
+    timestamp: action.timestamp,
+    type: "execution" as const,
+    action: action.action.toLowerCase().replace(/_/g, "_") as any,
+    reason: action.reasoning,
+    confidence: action.confidence,
+    price: action.price,
+    takeProfit: action.takeProfit,
+    stopLoss: action.stopLoss,
+    executionStatus: action.result?.status,
+    pnl: action.result?.pnl,
+    pnlPercent: action.result?.pnlPercent,
+    positionSize: action.positionSize,
+    symbol: action.symbol,
+  }))
 
   // Handle AI analysis trigger
   const handleAIAnalysis = useCallback(async () => {
@@ -385,7 +400,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
         a.id === agent.id ? { ...a, status: newStatus } : a
       ),
     }))
-    
+
     console.log("[DEBUG] Store updated, new agents:", useAppStore.getState().agents)
 
     // Call API to actually start/stop the agent
@@ -469,183 +484,175 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Page Header */}
-      <div className="mb-6 px-6 pt-6 pb-0">
-        <div className="flex items-center gap-3 mb-2">
-          <Button variant="ghost" size="sm" onClick={() => router.push("/agents")}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-2xl font-bold">{agent.name}</h1>
+      <div className="flex flex-row items-center justify-between gap-3 mb-2  py-2 border-b">
+        <div className="px-6">
+          <div className="flex items-center gap-3 mb-2">
+            <h1 className="text-2xl font-bold">{agent.name}</h1>
+          </div>
+          <p className="text-muted-foreground">{(agent.symbols ?? []).join(", ")} · {agent.timeframe}</p>
         </div>
-        <p className="text-muted-foreground">{(agent.symbols ?? []).join(", ")} · {agent.timeframe}</p>
-      </div>
 
-      {/* Top Control Bar - Fixed */}
-      <div className="flex items-center justify-between gap-3 flex-wrap shrink-0 border-b bg-background p-3 px-6">
-            <div className="flex items-center gap-2">
-              <Badge variant={backendConnected ? "default" : "secondary"} className="text-xs">
-                {backendConnected ? "Live" : "Demo"}
-              </Badge>
-              <Badge
-                variant={isRunning ? "default" : "secondary"}
-                className={cn(isRunning && "bg-success text-success-foreground")}
-              >
-                {isRunning ? "Running" : agent.status}
-              </Badge>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {agent?.symbols && agent.symbols.length > 0 && (
-                <Select value={selectedSymbol} onValueChange={(v) => setSelectedSymbol(v)}>
-                  <SelectTrigger size="sm" className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {agent.symbols.map((s: string) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleAIAnalysis}
-                disabled={aiTrading.isAnalyzing || liveKlines.length < 50}
-              >
-                {aiTrading.isAnalyzing ? (
-                  <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
-                ) : (
-                  <Zap className="mr-1 h-3 w-3" />
-                )}
-                Analyze
-              </Button>
-              <Button variant="outline" size="icon" onClick={() => setShowSettings(true)}>
-                <Settings className="h-4 w-4" />
-              </Button>
-              <Button size="sm" onClick={handleToggle}>
-                {isRunning ? (
-                  <>
-                    <Pause className="mr-1 h-4 w-4" /> Pause
-                  </>
-                ) : (
-                  <>
-                    <Play className="mr-1 h-4 w-4" /> Start
-                  </>
-                )}
-              </Button>
-            </div>
+        {/* Top Control Bar */}
+        <div className="flex items-center justify-between gap-3 flex-wrap shrink-0 bg-background p-3 px-6">
+          <div className="flex items-center gap-2">
+            <Badge variant={backendConnected ? "default" : "secondary"} className="text-xs">
+              {backendConnected ? "Live" : "Demo"}
+            </Badge>
+            <Badge
+              variant={isRunning ? "default" : "secondary"}
+              className={cn(isRunning && "bg-success text-success-foreground")}
+            >
+              {isRunning ? "Running" : agent.status}
+            </Badge>
           </div>
 
-          {/* Scrollable Content Area */}
-          <div className="flex-1 overflow-auto flex flex-col p-4 gap-3">
-
-            {/* Main 3-Column Layout */}
-            <div className="grid gap-3 grid-cols-3 flex-1 min-h-0">
-              {/* Left: Chart + AI Trading Summary */}
-              <div className="space-y-3 min-h-0 flex flex-col">
-                <Card className="flex-1 flex flex-col overflow-hidden">
-                  <CardHeader className="pb-2 shrink-0">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <CardTitle className="text-sm truncate">{selectedSymbol}</CardTitle>
-                          <p className="text-sm font-bold text-foreground">
-                            {currentPrice != null ? `$${(currentPrice / 1000).toFixed(1)}K` : "—"}
-                          </p>
-                          <p className={cn("text-xs", priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground")}>
-                            {priceChange != null ? (priceChange >= 0 ? "+" : "") : ""}
-                            {priceChange != null ? `${priceChange.toFixed(1)}%` : "--"}
-                          </p>
-                        </div>
-                        <CardDescription className="text-xs truncate">
-                          {exchange?.name ?? "Exchange"} · {selectedTimeframe}
-                        </CardDescription>
-                      </div>
-                      <div className="flex gap-1 shrink-0">
-                        {["1m", "1h", "1d"].map((tf) => (
-                          <Button
-                            key={tf}
-                            variant={selectedTimeframe === tf ? "default" : "ghost"}
-                            size="sm"
-                            className="h-6 px-1 text-xs"
-                            onClick={() => setSelectedTimeframe(tf)}
-                          >
-                            {tf}
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="flex-1 overflow-hidden">
-                    <KlineChart
-                      agentId={id}
-                      symbol={selectedSymbol ?? agent.symbols?.[0] ?? ""}
-                      timeframe={selectedTimeframe ?? (agent.timeframe ?? "1h")}
-                    />
-                  </CardContent>
-                </Card>
-                <div className="shrink-0">
-                  <AITradingSummary actions={tradingActions} currentPositions={positions.length} />
-                </div>
-              </div>
-
-              {/* Middle: AI Decision + Position */}
-              <div className="space-y-3 min-h-0 flex flex-col">
-                <Card className="p-3 shrink-0">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <p className="text-xs text-muted-foreground">PnL</p>
-                      <p className={cn("text-lg font-bold", isProfitable ? "text-success" : "text-destructive")}>
-                        {isProfitable ? "+" : ""}{pnl.toFixed(1)}%
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Trades</p>
-                      <p className="text-lg font-bold text-foreground">{totalTrades}</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Win Rate</p>
-                      <p className="text-lg font-bold text-foreground">{winRate}%</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-muted-foreground">Signal</p>
-                      <p className="text-lg font-bold text-foreground capitalize truncate">
-                        {lastSignal?.action ?? "—"}
-                      </p>
-                    </div>
-                  </div>
-                </Card>
-                <div className="shrink-0">
-                  <AIDecisionPanel
-                    decision={aiTrading.latestAnalysis?.decision}
-                    isAnalyzing={aiTrading.isAnalyzing}
-                    onAnalyze={handleAIAnalysis}
-                    lastUpdateTime={aiTrading.latestAnalysis?.timestamp}
-                  />
-                </div>
-                <div className="flex-1 min-h-0 overflow-hidden">
-                  <PositionPanel positions={positions} balance={balance} />
-                </div>
-              </div>
-
-              {/* Right: Indicators */}
-              <div className="min-h-0 flex flex-col overflow-auto">
-                <LiveIndicatorPanel indicators={liveIndicators} isLive={isKlineLive} symbol={selectedSymbol} />
-              </div>
-            </div>
-
-            {/* Details Button */}
-            <Button 
-              onClick={() => setShowDetailDrawer(true)} 
-              className="w-full shrink-0"
+          <div className="flex items-center gap-2">
+            {agent?.symbols && agent.symbols.length > 0 && (
+              <Select value={selectedSymbol} onValueChange={(v) => setSelectedSymbol(v)}>
+                <SelectTrigger size="sm" className="w-40">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {agent.symbols.map((s: string) => (
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            <Button
               variant="outline"
+              size="sm"
+              onClick={handleAIAnalysis}
+              disabled={aiTrading.isAnalyzing || liveKlines.length < 50}
             >
-              <ChevronDown className="mr-2 h-4 w-4" />
-              Additional Details (Actions, Tools, Signals, Orders, Logs)
+              {aiTrading.isAnalyzing ? (
+                <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Zap className="mr-1 h-3 w-3" />
+              )}
+              Analyze
+            </Button>
+            <Button variant="outline" size="icon" onClick={() => setShowSettings(true)}>
+              <Settings className="h-4 w-4" />
+            </Button>
+            <Button size="sm" onClick={handleToggle}>
+              {isRunning ? (
+                <>
+                  <Pause className="mr-1 h-4 w-4" /> Pause
+                </>
+              ) : (
+                <>
+                  <Play className="mr-1 h-4 w-4" /> Start
+                </>
+              )}
             </Button>
           </div>
+        </div>
+      </div>
+
+      {/* Scrollable Content Area */}
+      <div className="flex-1 overflow-auto flex flex-col p-4 gap-3">
+
+        {/* Main 3-Column Layout */}
+        <div className="grid gap-3 grid-cols-3 flex-1 min-h-0">
+          {/* Left: Chart + AI Trading Summary */}
+          <div className="space-y-3 min-h-0 flex flex-col overflow-hidden">
+            <Card className="flex-1 flex flex-col overflow-hidden max-h-96">
+              <CardHeader className="pb-2 shrink-0">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <CardTitle className="text-sm truncate">{selectedSymbol}</CardTitle>
+                      <p className="text-sm font-bold text-foreground">
+                        {currentPrice != null ? `$${(currentPrice / 1000).toFixed(1)}K` : "—"}
+                      </p>
+                      <p className={cn("text-xs", priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground")}>
+                        {priceChange != null ? (priceChange >= 0 ? "+" : "") : ""}
+                        {priceChange != null ? `${priceChange.toFixed(1)}%` : "--"}
+                      </p>
+                    </div>
+                    <CardDescription className="text-xs truncate">
+                      {exchange?.name ?? "Exchange"} · {selectedTimeframe}
+                    </CardDescription>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    {["1m", "1h", "1d"].map((tf) => (
+                      <Button
+                        key={tf}
+                        variant={selectedTimeframe === tf ? "default" : "ghost"}
+                        size="sm"
+                        className="h-6 px-1 text-xs"
+                        onClick={() => setSelectedTimeframe(tf)}
+                      >
+                        {tf}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="flex-1 overflow-hidden">
+                <KlineChart
+                  agentId={id}
+                  symbol={selectedSymbol ?? agent.symbols?.[0] ?? ""}
+                  timeframe={selectedTimeframe ?? (agent.timeframe ?? "1h")}
+                />
+              </CardContent>
+            </Card>
+            <div className="shrink-0">
+              <AITradingSummary actions={tradingActions} currentPositions={positions.length} />
+            </div>
+          </div>
+
+          {/* Middle: AI Decision + Position */}
+          <div className="space-y-3 min-h-0 flex flex-col">
+            <Card className="p-3 shrink-0">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">PnL</p>
+                  <p className={cn("text-lg font-bold", isProfitable ? "text-success" : "text-destructive")}>
+                    {isProfitable ? "+" : ""}{pnl.toFixed(1)}%
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Trades</p>
+                  <p className="text-lg font-bold text-foreground">{totalTrades}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Win Rate</p>
+                  <p className="text-lg font-bold text-foreground">{winRate}%</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Signal</p>
+                  <p className="text-lg font-bold text-foreground capitalize truncate">
+                    {lastSignal?.action ?? "—"}
+                  </p>
+                </div>
+              </div>
+            </Card>
+            {/* AI Decision panel removed */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <PositionPanel positions={positions} balance={balance} agentId={agent.id} />
+            </div>
+          </div>
+
+          {/* Right: Timeline */}
+          <div className="min-h-0 flex flex-col overflow-auto">
+            <TradingTimeline events={timelineEvents} />
+          </div>
+        </div>
+
+        {/* Details Button */}
+        <Button
+          onClick={() => setShowDetailDrawer(true)}
+          className="w-full shrink-0"
+          variant="outline"
+        >
+          <ChevronDown className="mr-2 h-4 w-4" />
+          Additional Details (Technical Indicators, Logs)
+        </Button>
+      </div>
 
       <EditAgentModal open={showSettings} onOpenChange={setShowSettings} agent={agent} />
 
@@ -656,29 +663,14 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
           </DrawerHeader>
           <div className="flex-1 overflow-auto p-4">
             <Tabs value={detailTab} onValueChange={setDetailTab} className="w-full">
-              <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="actions">Actions</TabsTrigger>
-                <TabsTrigger value="tools">Tools</TabsTrigger>
-                <TabsTrigger value="signals">Signals</TabsTrigger>
-                <TabsTrigger value="orders">Orders</TabsTrigger>
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="indicators">Technical Indicators</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
               </TabsList>
 
               <div className="mt-4">
-                <TabsContent value="actions">
-                  <ActionHistory actions={tradingActions} />
-                </TabsContent>
-
-                <TabsContent value="tools">
-                  <ToolOperations toolCalls={toolCalls} />
-                </TabsContent>
-
-                <TabsContent value="signals">
-                  <SignalHistory agentId={agent.id} />
-                </TabsContent>
-
-                <TabsContent value="orders">
-                  <OrdersTable agentId={agent.id} />
+                <TabsContent value="indicators">
+                  <LiveIndicatorPanel indicators={liveIndicators} isLive={isKlineLive} symbol={selectedSymbol} />
                 </TabsContent>
 
                 <TabsContent value="logs">
