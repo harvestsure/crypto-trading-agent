@@ -32,6 +32,10 @@ import { cn } from "@/lib/utils"
 import { KlineChart } from "@/components/charts/kline-chart"
 import { ProfitChart } from "@/components/charts/profit-chart"
 import { IndicatorPanel } from "@/components/agents/indicator-panel"
+import { LiveIndicatorPanel } from "@/components/agents/live-indicator-panel"
+import { AIDecisionPanel } from "@/components/agents/ai-decision-panel"
+import { AITradingSummary } from "@/components/agents/ai-trading-summary"
+import { ActionHistory } from "@/components/agents/action-history"
 import { PositionPanel } from "@/components/agents/position-panel"
 import { ConversationHistory } from "@/components/agents/conversation-history"
 import { ToolOperations } from "@/components/agents/tool-operations"
@@ -39,6 +43,11 @@ import { SignalHistory } from "@/components/agents/signal-history"
 import { OrdersTable } from "@/components/agents/orders-table"
 import { AgentLogs } from "@/components/agents/agent-logs"
 import { EditAgentModal } from "@/components/modals/edit-agent-modal"
+import { useAITrading } from "@/hooks/use-ai-trading"
+import { useKlineData } from "@/hooks/use-kline-data"
+import { calculateAllIndicators } from "@/lib/indicators"
+import { generateMockTradingActions } from "@/lib/mock-trading-data"
+import type { TradingAction } from "@/components/agents/action-history"
 import {
   useBackendStatus,
   useOpenPositions,
@@ -261,6 +270,66 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
+  // Kline data hook
+  const {
+    klines: liveKlines,
+    isLoading: isLoadingKlines,
+    isLive: isKlineLive,
+  } = useKlineData({
+    exchangeId: agent?.exchangeId ?? "",
+    symbol: selectedSymbol ?? "",
+    timeframe: selectedTimeframe ?? "1h",
+    autoSubscribe: !!agent && backendConnected,
+  })
+
+  // AI Trading hook
+  const aiTrading = useAITrading({
+    symbol: selectedSymbol ?? "",
+    timeframe: selectedTimeframe ?? "1h",
+    customPrompt: agent?.prompt,
+    riskTolerance: "medium",
+    autoAnalyze: false, // Manual trigger only
+  })
+
+  // Calculate real-time indicators
+  const liveIndicators = liveKlines.length > 50 ? aiTrading.calculateIndicators(liveKlines) : undefined
+
+  // Trading actions history
+  const [tradingActions, setTradingActions] = useState<TradingAction[]>(() => {
+    // Initialize with some mock data for demonstration
+    return generateMockTradingActions(12, selectedSymbol ?? agent?.symbols?.[0])
+  })
+
+  // Handle AI analysis trigger
+  const handleAIAnalysis = useCallback(async () => {
+    if (liveKlines.length < 50) {
+      console.log("[v0] Insufficient kline data for analysis")
+      return
+    }
+
+    const result = await aiTrading.analyze(liveKlines)
+    if (result) {
+      // Add to action history
+      const newAction: TradingAction = {
+        id: `action_${Date.now()}`,
+        timestamp: result.timestamp,
+        action: result.decision.action,
+        symbol: selectedSymbol ?? "",
+        confidence: result.decision.confidence,
+        reasoning: result.decision.reasoning,
+        price: currentPrice ?? undefined,
+        positionSize: result.decision.positionSize,
+        stopLoss: result.decision.stopLoss,
+        takeProfit: result.decision.takeProfit,
+        result: {
+          status: "pending",
+        },
+      }
+
+      setTradingActions((prev) => [newAction, ...prev])
+    }
+  }, [liveKlines, aiTrading, selectedSymbol, currentPrice])
+
   // Update price from ticker
   useEffect(() => {
     if (!ticker) return
@@ -457,16 +526,19 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   </Select>
                 )}
 
-                {backendConnected && (
-                  <Button variant="outline" size="sm" onClick={handleTriggerAnalysis} disabled={isAnalyzing}>
-                    {isAnalyzing ? (
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Zap className="mr-2 h-4 w-4" />
-                    )}
-                    Analyze Now
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleAIAnalysis}
+                  disabled={aiTrading.isAnalyzing || liveKlines.length < 50}
+                >
+                  {aiTrading.isAnalyzing ? (
+                    <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Zap className="mr-2 h-4 w-4" />
+                  )}
+                  AI Analyze
+                </Button>
                 <Button variant="outline" size="icon" onClick={() => setShowSettings(true)}>
                   <Settings className="h-4 w-4" />
                 </Button>
@@ -582,7 +654,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
               </Card>
             </div>
 
-            {/* Main Content - 3 Column Layout */}
+            {/* Main Content - 4 Column Layout */}
             <div className="grid gap-6 lg:grid-cols-4">
               {/* Chart Section */}
               <div className="lg:col-span-2 space-y-6">
@@ -621,22 +693,37 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                 <ProfitChart data={profitData} title="30-Day Performance" />
               </div>
 
-              {/* Positions & Indicators Panel */}
+              {/* AI Decision & Indicators */}
               <div className="space-y-6">
+                <AIDecisionPanel
+                  decision={aiTrading.latestAnalysis?.decision}
+                  isAnalyzing={aiTrading.isAnalyzing}
+                  onAnalyze={handleAIAnalysis}
+                  lastUpdateTime={aiTrading.latestAnalysis?.timestamp}
+                />
                 <PositionPanel positions={positions} balance={balance} />
-                <IndicatorPanel indicators={indicators} symbol={selectedSymbol} />
               </div>
 
-              {/* AI Conversation & Tools */}
+              {/* Indicators & Stats */}
               <div className="space-y-6">
-                <ConversationHistory messages={conversations} />
+                <LiveIndicatorPanel indicators={liveIndicators} isLive={isKlineLive} symbol={selectedSymbol} />
+                <AITradingSummary actions={tradingActions} currentPositions={positions.length} />
               </div>
+            </div>
+
+            {/* Conversation History Full Width */}
+            <div className="mt-6">
+              <ConversationHistory messages={conversations} />
             </div>
 
             {/* Tabs Section */}
             <div className="mt-6">
-              <Tabs defaultValue="tools">
+              <Tabs defaultValue="actions">
                 <TabsList>
+                  <TabsTrigger value="actions" className="flex items-center gap-2">
+                    <Activity className="h-4 w-4" />
+                    AI Actions
+                  </TabsTrigger>
                   <TabsTrigger value="tools" className="flex items-center gap-2">
                     <Wrench className="h-4 w-4" />
                     Tool Operations
@@ -646,6 +733,10 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   <TabsTrigger value="logs">Logs</TabsTrigger>
                   <TabsTrigger value="config">Configuration</TabsTrigger>
                 </TabsList>
+
+                <TabsContent value="actions" className="mt-4">
+                  <ActionHistory actions={tradingActions} />
+                </TabsContent>
 
                 <TabsContent value="tools" className="mt-4">
                   <ToolOperations toolCalls={toolCalls} />
