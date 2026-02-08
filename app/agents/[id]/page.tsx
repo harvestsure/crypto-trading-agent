@@ -1,6 +1,5 @@
 import { use } from "react"
-import { ProtectedRoute } from "@/components/auth/protected-route"
-import AgentDetailClient from "./agent-detail-client"
+import CompactAgentPage from "./page-compact"
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -8,9 +7,5 @@ interface PageProps {
 
 export default function AgentDetailPage({ params }: PageProps) {
   const { id } = use(params)
-  return (
-    <ProtectedRoute>
-      <AgentDetailClient id={id} />
-    </ProtectedRoute>
-  )
+  return <CompactAgentPage params={{ id }} />
 }
