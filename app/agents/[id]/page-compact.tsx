@@ -79,6 +79,11 @@ export default function CompactAgentPage({ params }: PageProps) {
     autoRefresh: true,
   })
 
+  // Calculate real-time indicators and current price
+  const indicators = klines.length > 50 ? aiTrading.calculateIndicators(klines) : undefined
+  const latestKline = klines[klines.length - 1]
+  const currentPrice = latestKline?.close
+
   // Initialize symbol
   useEffect(() => {
     if (agent?.symbols?.[0] && !selectedSymbol) {
@@ -138,11 +143,6 @@ export default function CompactAgentPage({ params }: PageProps) {
       await tradingActions.submitAction(action)
     }
   }, [klines, aiTrading, tradingActions, selectedSymbol, currentPrice])
-
-  // Calculate real-time indicators
-  const indicators = klines.length > 50 ? aiTrading.calculateIndicators(klines) : undefined
-  const latestKline = klines[klines.length - 1]
-  const currentPrice = latestKline?.close
 
   if (!agent) {
     return (
