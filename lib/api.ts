@@ -571,3 +571,37 @@ export async function analyzeMarket(params: {
     indicators: string[]
   }>(`/api/analyze?${query}`)
 }
+
+// ============== AI Trading Analysis ==============
+
+export async function analyzeWithAI(params: {
+  symbol: string
+  timeframe: string
+  klines: Array<{
+    timestamp: number
+    open: number
+    high: number
+    low: number
+    close: number
+    volume: number
+  }>
+  customPrompt?: string
+  riskTolerance?: "low" | "medium" | "high"
+}) {
+  return fetchApi<{
+    success: boolean
+    decision: {
+      action: "LONG" | "SHORT" | "CLOSE_LONG" | "CLOSE_SHORT" | "HOLD"
+      confidence: number
+      reasoning: string
+      stopLoss?: number
+      takeProfit?: number
+      positionSize: number
+    }
+    indicators: Record<string, any>
+    timestamp: number
+  }>("/api/trading/analyze", {
+    method: "POST",
+    body: JSON.stringify(params),
+  })
+}
