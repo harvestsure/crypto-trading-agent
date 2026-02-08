@@ -1,10 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ProtectedRoute } from "@/components/auth/protected-route"
-import { Sidebar } from "@/components/layout/sidebar"
-import { Header } from "@/components/layout/header"
-import { useSidebar } from "@/contexts/sidebar-context"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -41,7 +37,6 @@ interface ActivityEvent {
 }
 
 export default function ActivityPage() {
-  const { isOpen } = useSidebar()
   const { agents } = useAppStore()
   const [activities, setActivities] = useState<ActivityEvent[]>([])
   const [filter, setFilter] = useState<string>("all")
@@ -176,13 +171,11 @@ export default function ActivityPage() {
   }
 
   return (
-    <ProtectedRoute>
-      <div className="flex min-h-screen">
-        <Sidebar />
-        <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
-          <Header title="Activity" description="Real-time activity log from all trading agents" />
-
-          <div className="p-6">
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Activity</h1>
+        <p className="text-muted-foreground">Real-time activity log from all trading agents</p>
+      </div>
             {/* Filters */}
             <div className="mb-6 flex flex-wrap items-center gap-4">
               <div className="relative flex-1 max-w-sm">
@@ -297,9 +290,7 @@ export default function ActivityPage() {
                         </div>
                       </div>
                     </div>
-                  ))}
-
-                  {filteredActivities.length === 0 && (
+                  ))}\n\n                  {filteredActivities.length === 0 && (
                     <div className="py-12 text-center">
                       <Bot className="mx-auto h-12 w-12 text-muted-foreground" />
                       <p className="mt-4 text-muted-foreground">No activities found</p>
@@ -308,9 +299,6 @@ export default function ActivityPage() {
                 </div>
               </CardContent>
             </Card>
-          </div>
-        </main>
-      </div>
-    </ProtectedRoute>
+    </div>
   )
 }

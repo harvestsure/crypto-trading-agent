@@ -21,12 +21,12 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { useSidebar } from "@/contexts/sidebar-context"
 
 interface HeaderProps {
-  title: string
+  title?: string
   description?: string
   showCreateAgent?: boolean
 }
 
-export function Header({ title, description, showCreateAgent = false }: HeaderProps) {
+export function Header({ title = "Crypto Trading Agent", description, showCreateAgent = false }: HeaderProps) {
   const { isOpen, toggle } = useSidebar()
   const [createModalOpen, setCreateModalOpen] = useState(false)
   const { fetchAgents } = useAppStore()

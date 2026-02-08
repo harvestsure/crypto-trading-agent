@@ -1,10 +1,6 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { ProtectedRoute } from "@/components/auth/protected-route"
-import { Sidebar } from "@/components/layout/sidebar"
-import { Header } from "@/components/layout/header"
-import { useSidebar } from "@/contexts/sidebar-context"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,7 +14,6 @@ import { useWebSocket } from "@/hooks/use-websocket"
 import { cn } from "@/lib/utils"
 
 export default function SettingsPage() {
-  const { isOpen } = useSidebar()
   const [apiUrl, setApiUrl] = useState("http://localhost:8000")
   const [wsUrl, setWsUrl] = useState("ws://localhost:8000")
   const [apiStatus, setApiStatus] = useState<"checking" | "connected" | "error">("error")
@@ -56,14 +51,12 @@ export default function SettingsPage() {
   }, [])
 
   return (
-    <ProtectedRoute>
-      <div className="flex min-h-screen">
-        <Sidebar />
-        <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
-          <Header title="Settings" description="Configure your trading system" />
-
-          <div className="p-6">
-            <Tabs defaultValue="connection">
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <p className="text-muted-foreground">Configure your trading system</p>
+      </div>
+      <Tabs defaultValue="connection">
               <TabsList>
                 <TabsTrigger value="connection">Connection</TabsTrigger>
                 <TabsTrigger value="notifications">Notifications</TabsTrigger>
@@ -305,9 +298,6 @@ export default function SettingsPage() {
                 </Card>
               </TabsContent>
             </Tabs>
-          </div>
-        </main>
       </div>
-    </ProtectedRoute>
-  )
-}
+    )
+  }

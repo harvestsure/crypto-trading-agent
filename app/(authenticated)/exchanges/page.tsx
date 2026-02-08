@@ -3,10 +3,6 @@
 import { useState } from "react"
 import { useExchanges } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
-import { ProtectedRoute } from "@/components/auth/protected-route"
-import { Sidebar } from "@/components/layout/sidebar"
-import { Header } from "@/components/layout/header"
-import { useSidebar } from "@/contexts/sidebar-context"
 import { CreateExchangeModal } from "@/components/modals/create-exchange-modal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -18,7 +14,6 @@ import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
 
 function ExchangesPageContent() {
-  const { isOpen } = useSidebar()
   const { exchanges, isLoading, mutate } = useExchanges()
   const { updateExchange, deleteExchange } = useAppStore()
   const [isCreateOpen, setIsCreateOpen] = useState(false)
@@ -42,12 +37,11 @@ function ExchangesPageContent() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
-        <Header title="Exchanges" description="Manage your exchange connections" />
-
-        <div className="p-6">
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">Exchanges</h1>
+        <p className="text-muted-foreground">Manage your exchange connections</p>
+      </div>
           {deleteError && (
             <Alert variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
@@ -158,18 +152,13 @@ function ExchangesPageContent() {
               </Table>
             </div>
           )}
-        </div>
+
 
         <CreateExchangeModal open={isCreateOpen} onOpenChange={setIsCreateOpen} onSuccess={() => mutate()} />
-      </main>
     </div>
   )
 }
 
 export default function ExchangesPage() {
-  return (
-    <ProtectedRoute>
-      <ExchangesPageContent />
-    </ProtectedRoute>
-  )
+  return <ExchangesPageContent />
 }

@@ -4,9 +4,6 @@ import { useState } from "react"
 import { useEffect } from "react"
 import { useModels } from "@/hooks/use-data"
 import { useAppStore } from "@/lib/store"
-import { Sidebar } from "@/components/layout/sidebar"
-import { Header } from "@/components/layout/header"
-import { useSidebar } from "@/contexts/sidebar-context"
 import { CreateModelModal } from "@/components/modals/create-model-modal"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -17,7 +14,6 @@ import { Plus, MoreVertical, Brain, Trash2, Edit, Loader2, AlertCircle, X } from
 import { Skeleton } from "@/components/ui/skeleton"
 
 export default function ModelsPage() {
-  const { isOpen } = useSidebar()
   const { models, isLoading, mutate } = useModels()
   const { updateModel, deleteModel } = useAppStore()
 
@@ -47,12 +43,11 @@ export default function ModelsPage() {
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <main className={`flex-1 transition-all duration-300 ease-in-out ${isOpen ? "pl-64" : "pl-16"}`}>
-        <Header title="AI Models" description="Manage your AI model configurations" />
-
-        <div className="p-6">
+    <div className="p-6">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold">AI Models</h1>
+        <p className="text-muted-foreground">Manage your AI model configurations</p>
+      </div>
           {deleteError && (
             <Alert variant="destructive" className="mb-4">
               <AlertCircle className="h-4 w-4" />
@@ -151,10 +146,8 @@ export default function ModelsPage() {
               </Table>
             </div>
           )}
-        </div>
 
         <CreateModelModal open={isCreateOpen} onOpenChange={setIsCreateOpen} onSuccess={() => mutate()} />
-      </main>
     </div>
   )
 }
