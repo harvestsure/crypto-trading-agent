@@ -79,36 +79,7 @@ export function AITradingSummary({ actions, currentPositions = 0 }: AITradingSum
           </div>
         </div>
 
-        {/* Signal Distribution */}
-        <div className="space-y-2">
-          <div className="text-xs font-medium text-muted-foreground">Signal Distribution</div>
 
-          <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <TrendingUp className="h-3 w-3 text-success" />
-              <span className="text-xs flex-1">Long</span>
-              <span className="text-xs font-medium">{longActions}</span>
-              <span className="text-xs text-muted-foreground">({longPercent.toFixed(0)}%)</span>
-            </div>
-            <Progress value={longPercent} className="h-1.5 [&>div]:bg-success" />
-
-            <div className="flex items-center gap-2">
-              <TrendingDown className="h-3 w-3 text-destructive" />
-              <span className="text-xs flex-1">Short</span>
-              <span className="text-xs font-medium">{shortActions}</span>
-              <span className="text-xs text-muted-foreground">({shortPercent.toFixed(0)}%)</span>
-            </div>
-            <Progress value={shortPercent} className="h-1.5 [&>div]:bg-destructive" />
-
-            <div className="flex items-center gap-2">
-              <Target className="h-3 w-3 text-muted-foreground" />
-              <span className="text-xs flex-1">Hold</span>
-              <span className="text-xs font-medium">{holdActions}</span>
-              <span className="text-xs text-muted-foreground">({holdPercent.toFixed(0)}%)</span>
-            </div>
-            <Progress value={holdPercent} className="h-1.5" />
-          </div>
-        </div>
 
         {/* Last Signal */}
         {lastAction && (
@@ -139,19 +110,6 @@ export function AITradingSummary({ actions, currentPositions = 0 }: AITradingSum
             </div>
           </div>
         )}
-
-        {/* Status */}
-        <div className="flex items-center justify-between pt-2 border-t border-border">
-          <div className="flex items-center gap-2">
-            <div className="h-2 w-2 rounded-full bg-success animate-pulse" />
-            <span className="text-xs text-muted-foreground">AI System Active</span>
-          </div>
-          {currentPositions > 0 && (
-            <Badge variant="outline" className="text-xs">
-              {currentPositions} open position{currentPositions !== 1 ? "s" : ""}
-            </Badge>
-          )}
-        </div>
       </CardContent>
     </Card>
   )

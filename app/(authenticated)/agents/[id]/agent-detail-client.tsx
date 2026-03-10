@@ -28,6 +28,8 @@ import { KlineChart } from "@/components/charts/kline-chart"
 import { IndicatorPanel } from "@/components/agents/indicator-panel"
 import { LiveIndicatorPanel } from "@/components/agents/live-indicator-panel"
 import { AITradingSummary } from "@/components/agents/ai-trading-summary"
+import { ProfitChart } from "@/components/charts/profit-chart"
+import { OrdersTable } from "@/components/agents/orders-table"
 import { PositionPanel } from "@/components/agents/position-panel"
 import { TradingTimeline } from "@/components/agents/trading-timeline"
 import type { TimelineEvent } from "@/components/agents/trading-timeline"
@@ -555,6 +557,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
       {/* Scrollable Content Area */}
       <div className="flex-1 overflow-auto flex flex-col p-4 gap-3">
 
+
         {/* Main 3-Column Layout */}
         <div className="grid gap-3 grid-cols-3 flex-1 min-h-0">
           {/* Left: Chart + AI Trading Summary */}
@@ -568,7 +571,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                       <p className="text-sm font-bold text-foreground">
                         {currentPrice != null ? `$${(currentPrice / 1000).toFixed(1)}K` : "—"}
                       </p>
-                      <p className={cn("text-xs", priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground")}>
+                      <p className={cn("text-xs", priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground")}> 
                         {priceChange != null ? (priceChange >= 0 ? "+" : "") : ""}
                         {priceChange != null ? `${priceChange.toFixed(1)}%` : "--"}
                       </p>
@@ -605,41 +608,24 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
             </div>
           </div>
 
-          {/* Middle: AI Decision + Position */}
+          {/* Middle: Profit Curve + AI Decision + Position */}
           <div className="space-y-3 min-h-0 flex flex-col">
-            <Card className="p-3 shrink-0">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-xs text-muted-foreground">PnL</p>
-                  <p className={cn("text-lg font-bold", isProfitable ? "text-success" : "text-destructive")}>
-                    {isProfitable ? "+" : ""}{pnl.toFixed(1)}%
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Trades</p>
-                  <p className="text-lg font-bold text-foreground">{totalTrades}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Win Rate</p>
-                  <p className="text-lg font-bold text-foreground">{winRate}%</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Signal</p>
-                  <p className="text-lg font-bold text-foreground capitalize truncate">
-                    {lastSignal?.action ?? "—"}
-                  </p>
-                </div>
-              </div>
-            </Card>
-            {/* AI Decision panel removed */}
+            {/* Profit Curve */}
+            <ProfitChart data={profitData} title="Profit Curve" />
+
             <div className="flex-1 min-h-0 overflow-hidden">
               <PositionPanel positions={positions} balance={balance} agentId={agent.id} />
             </div>
           </div>
 
-          {/* Right: Timeline */}
-          <div className="min-h-0 flex flex-col overflow-auto">
+          {/* Right: Timeline 占据三行 */}
+          <div className="min-h-0 flex flex-col overflow-auto row-span-3">
             <TradingTimeline events={timelineEvents} />
+          </div>
+
+          {/* Orders Table: 跨第一列和第二列下方 */}
+          <div className="col-span-2 mt-3">
+            <OrdersTable agentId={agent.id} />
           </div>
         </div>
 

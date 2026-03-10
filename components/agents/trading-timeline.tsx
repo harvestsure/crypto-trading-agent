@@ -132,7 +132,7 @@ export function TradingTimeline({ events, maxHeight = "600px" }: TradingTimeline
   })
 
   return (
-    <Card className="max-h-200 flex flex-col">
+    <Card className="max-h-300 flex flex-col">
       <CardHeader className="pb-3 shrink-0">
         <CardTitle className="text-base flex items-center justify-between">
           <span>Trading Timeline</span>

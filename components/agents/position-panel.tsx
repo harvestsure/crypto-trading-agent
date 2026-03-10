@@ -22,15 +22,29 @@ interface Order {
 }
 
 interface PositionPanelProps {
-  positions: Position[]
-  balance: AccountBalance
-  agentId?: string
+  positions: Position[];
+  balance: AccountBalance;
+  agentId?: string;
+  pnl?: number;
+  totalTrades?: number;
+  winRate?: number;
+  lastSignal?: { action?: string };
+  isProfitable?: boolean;
 }
 
-export function PositionPanel({ positions, balance, agentId }: PositionPanelProps) {
-  const isProfitToday = balance.todayPnl >= 0
-  const [orders, setOrders] = useState<Order[]>([])
-  const [orderFilter, setOrderFilter] = useState<"all" | "open" | "closed">("all")
+
+export function PositionPanel({ positions, balance, agentId, pnl, totalTrades, winRate, lastSignal, isProfitable }: PositionPanelProps) {
+  const isProfitToday = balance.todayPnl >= 0;
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [orderFilter, setOrderFilter] = useState<"all" | "open" | "closed">("all");
+
+  // Summary props
+  // Use fallback if not provided
+  const summaryPnl = typeof pnl === "number" ? pnl : 0;
+  const summaryTrades = typeof totalTrades === "number" ? totalTrades : 0;
+  const summaryWinRate = typeof winRate === "number" ? winRate : 0;
+  const summarySignal = lastSignal?.action ?? "—";
+  const summaryIsProfitable = typeof isProfitable === "boolean" ? isProfitable : summaryPnl >= 0;
 
   useEffect(() => {
     // Generate mock orders
@@ -88,10 +102,9 @@ export function PositionPanel({ positions, balance, agentId }: PositionPanelProp
         status: "filled",
         pnl: -45.3,
       },
-    ]
-
-    setOrders(mockOrders)
-  }, [agentId])
+    ];
+    setOrders(mockOrders);
+  }, [agentId]);
 
   const getFilteredOrders = () => {
     if (orderFilter === "all") return orders
@@ -106,8 +119,7 @@ export function PositionPanel({ positions, balance, agentId }: PositionPanelProp
   const filteredOrders = getFilteredOrders()
 
   return (
-    <div className="space-y-4">
-      {/* Account Overview */}
+    <div>
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
@@ -115,8 +127,33 @@ export function PositionPanel({ positions, balance, agentId }: PositionPanelProp
             Account Overview
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
+        <CardContent className="space-y-6">
+          {/* Summary Card内容 */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-muted-foreground">PnL</p>
+              <p className={cn("text-lg font-bold", summaryIsProfitable ? "text-success" : "text-destructive")}> 
+                {summaryIsProfitable ? "+" : ""}{summaryPnl.toFixed(1)}%
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Trades</p>
+              <p className="text-lg font-bold text-foreground">{summaryTrades}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Win Rate</p>
+              <p className="text-lg font-bold text-foreground">{summaryWinRate}%</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Signal</p>
+              <p className="text-lg font-bold text-foreground capitalize truncate">
+                {summarySignal}
+              </p>
+            </div>
+          </div>
+
+          {/* Account Overview内容 */}
+          <div className="grid grid-cols-2 gap-4 mt-6">
             <div className="space-y-1">
               <p className="text-xs text-muted-foreground">Total Balance</p>
               <p className="text-xl font-bold text-foreground">
@@ -136,21 +173,21 @@ export function PositionPanel({ positions, balance, agentId }: PositionPanelProp
           <div className="grid grid-cols-3 gap-3">
             <div className="rounded-lg bg-secondary/50 p-2 text-center">
               <p className="text-xs text-muted-foreground">Today</p>
-              <p className={cn("text-sm font-semibold", isProfitToday ? "text-success" : "text-destructive")}>
+              <p className={cn("text-sm font-semibold", isProfitToday ? "text-success" : "text-destructive")}> 
                 {isProfitToday ? "+" : ""}
                 {balance.todayPnl.toFixed(2)}%
               </p>
             </div>
             <div className="rounded-lg bg-secondary/50 p-2 text-center">
               <p className="text-xs text-muted-foreground">Week</p>
-              <p className={cn("text-sm font-semibold", balance.weekPnl >= 0 ? "text-success" : "text-destructive")}>
+              <p className={cn("text-sm font-semibold", balance.weekPnl >= 0 ? "text-success" : "text-destructive")}> 
                 {balance.weekPnl >= 0 ? "+" : ""}
                 {balance.weekPnl.toFixed(2)}%
               </p>
             </div>
             <div className="rounded-lg bg-secondary/50 p-2 text-center">
               <p className="text-xs text-muted-foreground">Month</p>
-              <p className={cn("text-sm font-semibold", balance.monthPnl >= 0 ? "text-success" : "text-destructive")}>
+              <p className={cn("text-sm font-semibold", balance.monthPnl >= 0 ? "text-success" : "text-destructive")}> 
                 {balance.monthPnl >= 0 ? "+" : ""}
                 {balance.monthPnl.toFixed(2)}%
               </p>
@@ -164,110 +201,11 @@ export function PositionPanel({ positions, balance, agentId }: PositionPanelProp
             </div>
             <div className="flex items-center justify-between">
               <span className="text-muted-foreground">Unrealized PnL</span>
-              <span className={cn(balance.unrealizedPnl >= 0 ? "text-success" : "text-destructive")}>
+              <span className={cn(balance.unrealizedPnl >= 0 ? "text-success" : "text-destructive")}> 
                 {balance.unrealizedPnl >= 0 ? "+" : ""}${balance.unrealizedPnl.toLocaleString()}
               </span>
             </div>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Orders */}
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base flex items-center gap-2">
-            <Shield className="h-4 w-4" />
-            Orders
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3 mb-4">
-            <div className="flex gap-2">
-              <Button
-                variant={orderFilter === "all" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setOrderFilter("all")}
-              >
-                All ({orders.length})
-              </Button>
-              <Button
-                variant={orderFilter === "open" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setOrderFilter("open")}
-              >
-                Open ({orders.filter((o) => o.status === "pending").length})
-              </Button>
-              <Button
-                variant={orderFilter === "closed" ? "default" : "outline"}
-                size="sm"
-                onClick={() => setOrderFilter("closed")}
-              >
-                Closed ({orders.filter((o) => o.status !== "pending").length})
-              </Button>
-            </div>
-          </div>
-
-          {filteredOrders.length === 0 ? (
-            <p className="text-center text-sm text-muted-foreground py-8">No orders</p>
-          ) : (
-            <div className="border rounded-lg overflow-hidden">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Side</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Price</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">PnL</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredOrders.map((order) => (
-                    <TableRow key={order.id}>
-                      <TableCell className="text-muted-foreground">{order.timestamp.toLocaleTimeString()}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="secondary"
-                          className={cn(
-                            order.side === "buy" ? "bg-success/20 text-success" : "bg-destructive/20 text-destructive",
-                          )}
-                        >
-                          {order.side.toUpperCase()}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{formatType(order.type)}</TableCell>
-                      <TableCell>{order.amount}</TableCell>
-                      <TableCell>${order.price.toLocaleString()}</TableCell>
-                      <TableCell>
-                        <Badge
-                          variant={
-                            order.status === "filled"
-                              ? "default"
-                              : order.status === "pending"
-                              ? "secondary"
-                              : "outline"
-                          }
-                        >
-                          {order.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell
-                        className={cn(
-                          "text-right font-medium",
-                          order.pnl && order.pnl > 0 && "text-success",
-                          order.pnl && order.pnl < 0 && "text-destructive",
-                        )}
-                      >
-                        {order.pnl ? `${order.pnl > 0 ? "+" : ""}$${order.pnl.toFixed(2)}` : "-"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>
