@@ -325,7 +325,7 @@ export function AgentConversationViewer({ agentId }: AgentConversationViewerProp
   ]
 
   return (
-    <Card className="flex flex-col h-full overflow-hidden">
+    <Card className="flex flex-col overflow-hidden" style={{ height: "100%" }}>
       {/* Panel header */}
       <CardHeader className="pb-0 pt-3 px-4 shrink-0 border-b">
         <div className="flex items-center gap-2 mb-2">
