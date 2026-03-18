@@ -66,15 +66,25 @@ async def get_agent_conversations(agent_id: str, limit: int = 100):
     try:
         conversations = ConversationRepository.get_by_agent(agent_id, limit)
         
-        # 格式化输出
+        # Format output with camelCase fields for frontend compatibility
         formatted = []
         for conv in conversations:
+            tool_call_raw = conv.get('tool_call')
+            tool_call = None
+            if tool_call_raw:
+                tool_call = {
+                    "id": tool_call_raw.get('id', ''),
+                    "name": tool_call_raw.get('name', tool_call_raw.get('tool_name', '')),
+                    "arguments": tool_call_raw.get('arguments', {}),
+                    "result": tool_call_raw.get('result'),
+                    "status": tool_call_raw.get('status', 'success'),
+                }
             formatted.append({
                 "id": conv.get('id'),
-                "role": conv.get('role'),  # system, user, assistant, tool
+                "role": conv.get('role'),
                 "content": conv.get('content'),
                 "timestamp": conv.get('created_at'),
-                "tool_call": conv.get('tool_call'),  # 如果是tool_call
+                "toolCall": tool_call,
             })
         
         return {
@@ -97,24 +107,22 @@ async def get_agent_tool_calls(agent_id: str, limit: int = 50):
     try:
         tool_calls = ToolCallRepository.get_by_agent(agent_id, limit)
         
-        # 格式化输出
+        # Format with camelCase for frontend compatibility
         formatted = []
         for tc in tool_calls:
             formatted.append({
                 "id": tc.get('id'),
-                "agent_id": tc.get('agent_id'),
-                "tool_name": tc.get('tool_name'),
+                "agentId": tc.get('agent_id'),
+                "name": tc.get('name'),
                 "arguments": tc.get('arguments'),
                 "result": tc.get('result'),
-                "error": tc.get('error'),
-                "status": tc.get('status'),  # success, failed, timeout
-                "duration_ms": tc.get('duration_ms'),
+                "status": tc.get('status'),
                 "timestamp": tc.get('created_at'),
             })
         
         return {
             "agent_id": agent_id,
-            "tool_calls": formatted,
+            "toolCalls": formatted,
             "count": len(formatted)
         }
     except Exception as e:

@@ -1,430 +1,421 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
-import useSWR from "swr"
+import { useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Bot, User, Wrench, RefreshCw, Zap, CheckCircle2, XCircle, Clock, MessageSquare } from "lucide-react"
+import {
+  Bot,
+  User,
+  Wrench,
+  RefreshCw,
+  Zap,
+  CheckCircle2,
+  XCircle,
+  Clock,
+  MessageSquare,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  Signal,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
-import { API_BASE_URL } from "@/lib/api"
+import {
+  useAgentConversations,
+  useAgentToolCalls,
+  useAgentSignals,
+  useBackendStatus,
+} from "@/hooks/use-agent-data"
 import type { ConversationMessage, ToolCall } from "@/lib/types"
 
-interface AgentConversationProps {
+interface AgentConversationViewerProps {
   agentId: string
 }
 
-interface ConversationResponse {
-  agent_id: string
-  conversations: ConversationMessage[]
-  count: number
+// ---- Action badge helpers ----
+const ACTION_CONFIG: Record<string, { label: string; className: string; icon: React.ReactNode }> = {
+  LONG: {
+    label: "LONG",
+    className: "bg-success/15 text-success border-success/30",
+    icon: <TrendingUp className="h-3 w-3" />,
+  },
+  SHORT: {
+    label: "SHORT",
+    className: "bg-destructive/15 text-destructive border-destructive/30",
+    icon: <TrendingDown className="h-3 w-3" />,
+  },
+  CLOSE: {
+    label: "CLOSE",
+    className: "bg-warning/15 text-warning border-warning/30",
+    icon: <Minus className="h-3 w-3" />,
+  },
+  HOLD: {
+    label: "HOLD",
+    className: "bg-muted text-muted-foreground border-border",
+    icon: <Minus className="h-3 w-3" />,
+  },
+  BUY: {
+    label: "BUY",
+    className: "bg-success/15 text-success border-success/30",
+    icon: <TrendingUp className="h-3 w-3" />,
+  },
+  SELL: {
+    label: "SELL",
+    className: "bg-destructive/15 text-destructive border-destructive/30",
+    icon: <TrendingDown className="h-3 w-3" />,
+  },
 }
 
-interface ToolCallsResponse {
-  agent_id: string
-  tool_calls: ToolCall[]
-  count: number
+function ActionBadge({ action }: { action: string }) {
+  const cfg = ACTION_CONFIG[action?.toUpperCase()] ?? ACTION_CONFIG["HOLD"]
+  return (
+    <Badge variant="outline" className={cn("flex items-center gap-1 text-xs font-semibold px-2 py-0.5", cfg.className)}>
+      {cfg.icon}
+      {cfg.label}
+    </Badge>
+  )
 }
 
-interface SignalsResponse {
-  agent_id: string
-  signals: any[]
-  count: number
+// ---- Role styling ----
+const ROLE_STYLE: Record<string, string> = {
+  user: "bg-primary/5 border-primary/20",
+  assistant: "bg-secondary border-border",
+  system: "bg-warning/8 border-warning/20",
+  tool: "bg-chart-3/8 border-chart-3/20",
 }
 
-const apiUrl = (path: string) => `${API_BASE_URL}${path}`
+function getRoleIcon(role: string) {
+  switch (role) {
+    case "user": return <User className="h-3.5 w-3.5 text-primary" />
+    case "assistant": return <Bot className="h-3.5 w-3.5 text-success" />
+    case "system": return <Zap className="h-3.5 w-3.5 text-warning" />
+    case "tool": return <Wrench className="h-3.5 w-3.5 text-chart-3" />
+    default: return <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+  }
+}
 
-export function AgentConversationViewer({ agentId }: AgentConversationProps) {
-  const [ws, setWs] = useState<WebSocket | null>(null)
-  const [isConnected, setIsConnected] = useState(false)
+function formatTime(ts: Date | string | undefined) {
+  if (!ts) return ""
+  const d = ts instanceof Date ? ts : new Date(ts)
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+}
+
+// ---- Conversation Tab ----
+function ConversationTab({ agentId, isConnected }: { agentId: string; isConnected: boolean }) {
+  const { conversations, isLoading, refresh } = useAgentConversations(agentId, true)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const { data: conversationData, mutate: mutateConversation, isLoading: conversationLoading } = useSWR<ConversationResponse>(
-    `/api/agents/${agentId}/conversations?limit=100`,
-    async (url) => {
-      const res = await fetch(apiUrl(url))
-      if (!res.ok) throw new Error("Failed to fetch")
-      return res.json()
-    },
-    { refreshInterval: 5000 }
-  )
-
-  const { data: toolCallsData, mutate: mutateToolCalls, isLoading: toolCallsLoading } = useSWR<ToolCallsResponse>(
-    `/api/agents/${agentId}/tool-calls?limit=50`,
-    async (url) => {
-      const res = await fetch(apiUrl(url))
-      if (!res.ok) throw new Error("Failed to fetch")
-      return res.json()
-    },
-    { refreshInterval: 5000 }
-  )
-
-  const { data: signalsData, mutate: mutateSignals, isLoading: signalsLoading } = useSWR<SignalsResponse>(
-    `/api/agents/${agentId}/signals?limit=50`,
-    async (url) => {
-      const res = await fetch(apiUrl(url))
-      if (!res.ok) throw new Error("Failed to fetch")
-      return res.json()
-    },
-    { refreshInterval: 5000 }
-  )
-
-  // WebSocket 实时连接
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
-    const backendHost = new URL(API_BASE_URL).host
-    const wsUrl = `${protocol}//${backendHost}/api/agents/ws/${agentId}/stream`
-
-    const websocket = new WebSocket(wsUrl)
-
-    websocket.onopen = () => {
-      setIsConnected(true)
-      console.log("WebSocket connected")
-      // 发送心跳
-      websocket.send(JSON.stringify({ type: "ping" }))
-    }
-
-    websocket.onmessage = (event) => {
-      const message = JSON.parse(event.data)
-      console.log("WebSocket message:", message)
-
-      // 根据消息类型更新数据
-      if (message.type === "conversation" || message.type === "pong") {
-        mutateConversation()
-      } else if (message.type === "signal") {
-        mutateSignals()
-      } else if (message.type === "tool") {
-        mutateToolCalls()
-      }
-    }
-
-    websocket.onerror = (error) => {
-      console.error("WebSocket error:", error)
-      setIsConnected(false)
-    }
-
-    websocket.onclose = () => {
-      setIsConnected(false)
-      console.log("WebSocket disconnected")
-    }
-
-    setWs(websocket)
-
-    return () => {
-      if (websocket.readyState === WebSocket.OPEN) {
-        websocket.close()
-      }
-    }
-  }, [agentId, mutateConversation, mutateSignals, mutateToolCalls])
-
-  // 自动滚动到底部
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-    }
-  }, [conversationData])
-
-  const getMessageIcon = (role: string) => {
-    switch (role) {
-      case "user":
-        return <User className="h-4 w-4 text-blue-500" />
-      case "assistant":
-        return <Bot className="h-4 w-4 text-green-500" />
-      case "system":
-        return <Zap className="h-4 w-4 text-yellow-500" />
-      case "tool":
-        return <Wrench className="h-4 w-4 text-purple-500" />
-      default:
-        return <MessageSquare className="h-4 w-4" />
-    }
-  }
-
-  const getMessageColor = (role: string) => {
-    switch (role) {
-      case "user":
-        return "bg-blue-50 border-blue-200"
-      case "assistant":
-        return "bg-green-50 border-green-200"
-      case "system":
-        return "bg-yellow-50 border-yellow-200"
-      case "tool":
-        return "bg-purple-50 border-purple-200"
-      default:
-        return "bg-gray-50 border-gray-200"
-    }
-  }
-
-  const getToolStatus = (tool: any) => {
-    if (tool.status === "success") {
-      return (
-        <div className="flex items-center gap-1 text-green-600">
-          <CheckCircle2 className="h-4 w-4" />
-          <span className="text-xs">Success</span>
-        </div>
-      )
-    } else if (tool.status === "failed") {
-      return (
-        <div className="flex items-center gap-1 text-red-600">
-          <XCircle className="h-4 w-4" />
-          <span className="text-xs">Failed</span>
-        </div>
-      )
-    }
-    return null
-  }
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [conversations])
 
   return (
-    <div className="space-y-4">
-      <Tabs defaultValue="conversations" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="conversations">
-            对话 ({conversationData?.count || 0})
-          </TabsTrigger>
-          <TabsTrigger value="tools">
-            工具调用 ({toolCallsData?.count || 0})
-          </TabsTrigger>
-          <TabsTrigger value="signals">
-            交易信号 ({signalsData?.count || 0})
-          </TabsTrigger>
-        </TabsList>
-
-        {/* 对话标签页 */}
-        <TabsContent value="conversations">
-          <Card className="h-full min-h-[600px]">
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                AI Conversation History
-              </CardTitle>
-              <div className="flex items-center gap-2">
-                <div
-                  className={cn(
-                    "h-2 w-2 rounded-full",
-                    isConnected ? "bg-green-500" : "bg-red-500"
-                  )}
-                />
-                <span className="text-xs text-gray-500">
-                  {isConnected ? "Connected" : "Disconnected"}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => mutateConversation()}
-                  disabled={conversationLoading}
-                >
-                  <RefreshCw className={cn("h-4 w-4", conversationLoading && "animate-spin")} />
-                </Button>
+    <Card className="flex flex-col h-full border-0 shadow-none rounded-none">
+      <CardHeader className="pb-2 flex flex-row items-center justify-between shrink-0 border-b px-4 pt-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <MessageSquare className="h-4 w-4" />
+          Conversation
+        </CardTitle>
+        <div className="flex items-center gap-2">
+          <div className={cn("h-2 w-2 rounded-full", isConnected ? "bg-success" : "bg-destructive")} />
+          <span className="text-xs text-muted-foreground">{isConnected ? "Live" : "Offline"}</span>
+          <Button variant="ghost" size="sm" onClick={() => refresh()} disabled={isLoading} className="h-6 w-6 p-0">
+            <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="flex-1 min-h-0 p-0">
+        <ScrollArea className="h-full" ref={scrollRef}>
+          <div className="space-y-2 p-3">
+            {conversations.length === 0 && !isLoading && (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground text-sm">
+                <Bot className="h-8 w-8 mb-2 opacity-40" />
+                No conversation yet
               </div>
-            </CardHeader>
+            )}
+            {conversations.map((msg: ConversationMessage) => (
+              <div
+                key={msg.id}
+                className={cn(
+                  "rounded-lg border p-3 space-y-1.5",
+                  ROLE_STYLE[msg.role] ?? "bg-secondary border-border",
+                )}
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    {getRoleIcon(msg.role)}
+                    <span className="text-xs font-semibold capitalize text-foreground">{msg.role}</span>
+                  </div>
+                  <span className="text-xs text-muted-foreground">{formatTime(msg.timestamp)}</span>
+                </div>
 
-            <CardContent>
-              <ScrollArea ref={scrollRef} className="h-[500px] w-full pr-4">
-                <div className="space-y-3">
-                  {conversationData?.conversations && conversationData.conversations.length > 0 ? (
-                    conversationData.conversations.map((msg, idx) => (
-                      <div key={idx} className={cn("rounded-lg border p-3", getMessageColor(msg.role))}>
-                        <div className="flex items-start gap-2">
-                          {getMessageIcon(msg.role)}
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center justify-between gap-2 mb-1">
-                              <span className="text-xs font-semibold capitalize text-gray-700">
-                                {msg.role}
-                              </span>
-                              <span className="text-xs text-gray-500">
-                                {msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : ""}
-                              </span>
-                            </div>
-                            <p className="text-sm text-gray-700 break-word">
-                              {msg.content}
-                            </p>
-                            {msg.toolCall && (
-                              <div className="mt-2 text-xs bg-white/50 rounded p-2">
-                                <span className="font-mono text-purple-700">
-                                  {msg.toolCall.name}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
+                {/* Content */}
+                <p className="text-xs text-foreground leading-relaxed whitespace-pre-wrap break-words">
+                  {msg.content}
+                </p>
+
+                {/* Inline tool call */}
+                {msg.toolCall && (
+                  <div className="rounded bg-background/60 border border-border p-2 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <Wrench className="h-3 w-3 text-chart-3" />
+                        <span className="text-xs font-mono text-chart-3 font-semibold">{msg.toolCall.name}</span>
                       </div>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500">
-                      No conversations yet
+                      {msg.toolCall.status === "pending" && <Clock className="h-3 w-3 text-muted-foreground" />}
+                      {msg.toolCall.status === "success" && <CheckCircle2 className="h-3 w-3 text-success" />}
+                      {msg.toolCall.status === "error" && <XCircle className="h-3 w-3 text-destructive" />}
+                    </div>
+                    <pre className="text-xs text-muted-foreground overflow-x-auto">
+                      {JSON.stringify(msg.toolCall.arguments, null, 2)}
+                    </pre>
+                    {msg.toolCall.result && (
+                      <p className="text-xs text-foreground pt-1 border-t border-border">
+                        {msg.toolCall.result}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---- Tool Calls Tab ----
+function ToolCallsTab({ agentId }: { agentId: string }) {
+  const { toolCalls, isLoading, refresh } = useAgentToolCalls(agentId, true)
+
+  return (
+    <Card className="flex flex-col h-full border-0 shadow-none rounded-none">
+      <CardHeader className="pb-2 flex flex-row items-center justify-between shrink-0 border-b px-4 pt-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Wrench className="h-4 w-4" />
+          Tool Calls
+        </CardTitle>
+        <Button variant="ghost" size="sm" onClick={() => refresh()} disabled={isLoading} className="h-6 w-6 p-0">
+          <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
+        </Button>
+      </CardHeader>
+      <CardContent className="flex-1 min-h-0 p-0">
+        <ScrollArea className="h-full">
+          <div className="space-y-2 p-3">
+            {toolCalls.length === 0 && !isLoading && (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground text-sm">
+                <Wrench className="h-8 w-8 mb-2 opacity-40" />
+                No tool calls yet
+              </div>
+            )}
+            {toolCalls.map((tc: ToolCall) => (
+              <div
+                key={tc.id}
+                className="rounded-lg border border-chart-3/20 bg-chart-3/5 p-3 space-y-2"
+              >
+                {/* Name + status */}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Wrench className="h-3.5 w-3.5 text-chart-3" />
+                    <span className="text-xs font-semibold font-mono text-foreground">{tc.name}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {tc.status === "success" && (
+                      <span className="flex items-center gap-0.5 text-success text-xs">
+                        <CheckCircle2 className="h-3 w-3" /> Success
+                      </span>
+                    )}
+                    {tc.status === "error" && (
+                      <span className="flex items-center gap-0.5 text-destructive text-xs">
+                        <XCircle className="h-3 w-3" /> Failed
+                      </span>
+                    )}
+                    {tc.status === "pending" && (
+                      <span className="flex items-center gap-0.5 text-muted-foreground text-xs">
+                        <Clock className="h-3 w-3" /> Pending
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Arguments */}
+                <pre className="text-xs text-muted-foreground bg-background/60 rounded p-2 overflow-x-auto border border-border">
+                  {JSON.stringify(tc.arguments, null, 2)}
+                </pre>
+
+                {/* Result */}
+                {tc.result && (
+                  <div className="text-xs bg-success/10 rounded p-2 border border-success/20 text-foreground">
+                    {tc.result}
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground text-right">{formatTime(tc.timestamp)}</p>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---- Signals Tab ----
+function SignalsTab({ agentId }: { agentId: string }) {
+  const { signals, isLoading, refresh } = useAgentSignals(agentId, true)
+
+  return (
+    <Card className="flex flex-col h-full border-0 shadow-none rounded-none">
+      <CardHeader className="pb-2 flex flex-row items-center justify-between shrink-0 border-b px-4 pt-3">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <Signal className="h-4 w-4" />
+          Signals
+        </CardTitle>
+        <Button variant="ghost" size="sm" onClick={() => refresh()} disabled={isLoading} className="h-6 w-6 p-0">
+          <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
+        </Button>
+      </CardHeader>
+      <CardContent className="flex-1 min-h-0 p-0">
+        <ScrollArea className="h-full">
+          <div className="space-y-2 p-3">
+            {signals.length === 0 && !isLoading && (
+              <div className="flex flex-col items-center justify-center py-12 text-muted-foreground text-sm">
+                <Signal className="h-8 w-8 mb-2 opacity-40" />
+                No signals yet
+              </div>
+            )}
+            {signals.map((signal: any) => {
+              const snapshot = signal.indicators_snapshot ?? {}
+              const action = (signal.action ?? "HOLD").toUpperCase()
+              return (
+                <div
+                  key={signal.id}
+                  className={cn(
+                    "rounded-lg border p-3 space-y-2",
+                    action === "LONG" ? "bg-success/8 border-success/20" :
+                    action === "SHORT" ? "bg-destructive/8 border-destructive/20" :
+                    "bg-muted border-border",
+                  )}
+                >
+                  {/* Action + symbol */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <ActionBadge action={action} />
+                      {snapshot.symbol && (
+                        <span className="text-xs font-mono text-muted-foreground">{snapshot.symbol}</span>
+                      )}
+                    </div>
+                    <span className="text-xs text-muted-foreground">{formatTime(signal.timestamp)}</span>
+                  </div>
+
+                  {/* Reason */}
+                  {signal.reason && (
+                    <p className="text-xs text-foreground leading-relaxed">{signal.reason}</p>
+                  )}
+
+                  {/* Position snapshot */}
+                  {(snapshot.price || signal.take_profit || signal.stop_loss || snapshot.amount) && (
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                      {snapshot.price && (
+                        <div>
+                          <span className="text-muted-foreground">Price: </span>
+                          <span className="font-mono">${Number(snapshot.price).toLocaleString()}</span>
+                        </div>
+                      )}
+                      {snapshot.amount && (
+                        <div>
+                          <span className="text-muted-foreground">Size: </span>
+                          <span className="font-mono">{snapshot.amount}</span>
+                        </div>
+                      )}
+                      {signal.take_profit && (
+                        <div>
+                          <span className="text-success">TP: </span>
+                          <span className="font-mono text-success">${Number(signal.take_profit).toLocaleString()}</span>
+                        </div>
+                      )}
+                      {signal.stop_loss && (
+                        <div>
+                          <span className="text-destructive">SL: </span>
+                          <span className="font-mono text-destructive">${Number(signal.stop_loss).toLocaleString()}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Confidence */}
+                  {signal.confidence != null && (
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-border rounded-full overflow-hidden">
+                        <div
+                          className={cn(
+                            "h-full rounded-full",
+                            action === "LONG" ? "bg-success" :
+                            action === "SHORT" ? "bg-destructive" : "bg-muted-foreground",
+                          )}
+                          style={{ width: `${Math.min(100, signal.confidence * 100)}%` }}
+                        />
+                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {(signal.confidence * 100).toFixed(0)}%
+                      </span>
                     </div>
                   )}
                 </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
+              )
+            })}
+          </div>
+        </ScrollArea>
+      </CardContent>
+    </Card>
+  )
+}
+
+// ---- Main Component ----
+export function AgentConversationViewer({ agentId }: AgentConversationViewerProps) {
+  const { isConnected } = useBackendStatus()
+  const { conversations } = useAgentConversations(agentId, true)
+  const { toolCalls } = useAgentToolCalls(agentId, true)
+  const { signals } = useAgentSignals(agentId, true)
+
+  return (
+    <Card className="flex flex-col h-full overflow-hidden">
+      <Tabs defaultValue="conversations" className="flex flex-col h-full">
+        <div className="border-b px-4 pt-3 pb-0 shrink-0">
+          <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+            <Bot className="h-4 w-4" />
+            AI Activity
+          </h3>
+          <TabsList className="grid w-full grid-cols-3 h-8">
+            <TabsTrigger value="conversations" className="text-xs">
+              Chat ({conversations.length})
+            </TabsTrigger>
+            <TabsTrigger value="tools" className="text-xs">
+              Tools ({toolCalls.length})
+            </TabsTrigger>
+            <TabsTrigger value="signals" className="text-xs">
+              Signals ({signals.length})
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="conversations" className="flex-1 mt-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+          <ConversationTab agentId={agentId} isConnected={isConnected} />
         </TabsContent>
 
-        {/* 工具调用标签页 */}
-        <TabsContent value="tools">
-          <Card className="h-full min-h-[600px]">
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Wrench className="h-4 w-4" />
-                Tool Calls
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => mutateToolCalls()}
-                disabled={toolCallsLoading}
-              >
-                <RefreshCw className={cn("h-4 w-4", toolCallsLoading && "animate-spin")} />
-              </Button>
-            </CardHeader>
-
-            <CardContent>
-              <ScrollArea className="h-[500px] w-full pr-4">
-                <div className="space-y-3">
-                  {toolCallsData?.tool_calls && toolCallsData.tool_calls.length > 0 ? (
-                    toolCallsData.tool_calls.map((tool, idx) => (
-                      <div key={idx} className="rounded-lg border border-purple-200 bg-purple-50 p-3">
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2 flex-1">
-                            <Wrench className="h-4 w-4 text-purple-500" />
-                            <span className="font-semibold text-sm text-gray-700">
-                              {tool.name}
-                            </span>
-                          </div>
-                          {getToolStatus(tool)}
-                        </div>
-
-                        {tool.arguments && (
-                          <div className="text-xs bg-white/50 rounded p-2 mb-2">
-                            <p className="text-gray-600 font-mono">
-                              {JSON.stringify(tool.arguments, null, 2)}
-                            </p>
-                          </div>
-                        )}
-
-                        {tool.result && (
-                          <div className="text-xs bg-green-100 rounded p-2 mb-1">
-                            <p className="text-gray-700">{tool.result}</p>
-                          </div>
-                        )}
-
-                        <div className="flex items-center justify-between text-xs text-gray-500 mt-2">
-                          <span>{(tool.timestamp ? new Date(tool.timestamp).getTime() : 0).toFixed(0)}ms</span>
-                          <span>{tool.timestamp ? new Date(tool.timestamp).toLocaleTimeString() : ""}</span>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500">
-                      No tool calls yet
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
+        <TabsContent value="tools" className="flex-1 mt-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+          <ToolCallsTab agentId={agentId} />
         </TabsContent>
 
-        {/* 交易信号标签页 */}
-        <TabsContent value="signals">
-          <Card className="h-full min-h-[600px]">
-            <CardHeader className="pb-2 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Zap className="h-4 w-4" />
-                Trading Signals
-              </CardTitle>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => mutateSignals()}
-                disabled={signalsLoading}
-              >
-                <RefreshCw className={cn("h-4 w-4", signalsLoading && "animate-spin")} />
-              </Button>
-            </CardHeader>
-
-            <CardContent>
-              <ScrollArea className="h-[500px] w-full pr-4">
-                <div className="space-y-3">
-                  {signalsData?.signals && signalsData.signals.length > 0 ? (
-                    signalsData.signals.map((signal, idx) => (
-                      <div
-                        key={idx}
-                        className={cn(
-                          "rounded-lg border p-3",
-                          signal.action === "LONG"
-                            ? "bg-green-50 border-green-200"
-                            : signal.action === "SHORT"
-                            ? "bg-red-50 border-red-200"
-                            : "bg-yellow-50 border-yellow-200"
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <div className="flex items-center gap-2">
-                            <Zap
-                              className={cn(
-                                "h-4 w-4",
-                                signal.action === "LONG"
-                                  ? "text-green-500"
-                                  : signal.action === "SHORT"
-                                  ? "text-red-500"
-                                  : "text-yellow-500"
-                              )}
-                            />
-                            <span className="font-semibold text-sm text-gray-700">
-                              {signal.action} {signal.symbol}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={cn(
-                                "text-xs px-2 py-1 rounded",
-                                signal.risk_level === "high"
-                                  ? "bg-red-100 text-red-700"
-                                  : signal.risk_level === "medium"
-                                  ? "bg-yellow-100 text-yellow-700"
-                                  : "bg-green-100 text-green-700"
-                              )}
-                            >
-                              {signal.risk_level} risk
-                            </span>
-                            {signal.confidence && (
-                              <span className="text-xs bg-white/50 rounded px-2 py-1">
-                                {(signal.confidence * 100).toFixed(0)}% confident
-                              </span>
-                            )}
-                          </div>
-                        </div>
-
-                        {signal.reason && (
-                          <p className="text-sm text-gray-700 mb-2">{signal.reason}</p>
-                        )}
-
-                        <div className="text-xs text-gray-600 space-y-1">
-                          {signal.recommended_entry && (
-                            <div>Entry: {signal.recommended_entry}</div>
-                          )}
-                          {signal.recommended_exit && (
-                            <div>Exit: {signal.recommended_exit}</div>
-                          )}
-                        </div>
-
-                        <div className="text-xs text-gray-500 mt-2">
-                          {signal.timestamp ? new Date(signal.timestamp).toLocaleString() : ""}
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-gray-500">
-                      No signals generated yet
-                    </div>
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
+        <TabsContent value="signals" className="flex-1 mt-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
+          <SignalsTab agentId={agentId} />
         </TabsContent>
       </Tabs>
-    </div>
+    </Card>
   )
 }

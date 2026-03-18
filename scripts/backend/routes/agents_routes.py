@@ -317,12 +317,42 @@ async def get_agent_balance(agent_id: str):
 
 @router.get("/{agent_id}/orders")
 async def get_agent_orders(agent_id: str, limit: int = 50):
-    return OrderRepository.get_by_agent(agent_id, limit)
+    raw = OrderRepository.get_by_agent(agent_id, limit)
+    orders = []
+    for o in raw:
+        orders.append({
+            "id": o.get("id"),
+            "symbol": o.get("symbol"),
+            "side": o.get("side"),
+            "type": o.get("order_type"),
+            "amount": o.get("amount"),
+            "price": o.get("price"),
+            "filled": o.get("filled_amount", 0),
+            "status": o.get("status"),
+            "pnl": o.get("pnl"),
+            "timestamp": o.get("created_at"),
+        })
+    return {"orders": orders}
 
 
 @router.get("/{agent_id}/profit-history")
 async def get_agent_profit_history(agent_id: str, days: int = 30):
-    return BalanceHistoryRepository.get_history(agent_id, days)
+    raw = BalanceHistoryRepository.get_history(agent_id, days)
+    profit_history = []
+    for row in raw:
+        from datetime import datetime as _dt
+        ts = row.get("created_at")
+        try:
+            ts_ms = int(_dt.fromisoformat(ts).timestamp() * 1000) if ts else 0
+        except Exception:
+            ts_ms = 0
+        profit_history.append({
+            "timestamp": ts_ms,
+            "balance": row.get("total_balance", 0),
+            "pnl": row.get("realized_pnl", 0),
+            "pnlPercent": 0,
+        })
+    return {"profitHistory": profit_history}
 
 
 @router.get("/{agent_id}/logs")

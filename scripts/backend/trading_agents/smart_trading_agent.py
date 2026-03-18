@@ -12,6 +12,7 @@ from datetime import datetime
 from dataclasses import dataclass
 import pandas as pd
 import pandas_ta as ta
+from uuid import uuid4
 
 from trading_agents.symbol_tracker import SymbolTracker
 from trading_agents.base_agent import BaseAgent, AgentStatus
@@ -20,6 +21,7 @@ from tools.tool_registry import ToolRegistry
 from exchanges.common_exchange import CommonExchange
 from common.data_types import DataEventType, DataEvent
 from prompts.trading_prompts import get_prompt_template
+from database import ConversationRepository, ToolCallRepository, SignalRepository
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +408,13 @@ class SmartTradingAgent(BaseAgent):
             
             # 7. 调用 LLM (使用异步调用避免阻塞事件循环)
             logger.info(f"Calling LLM for decision...")
+
+            # Persist user prompt to DB
+            try:
+                ConversationRepository.add_message(self.agent_id, "user", prompt)
+            except Exception as db_err:
+                logger.warning(f"Failed to persist user prompt to DB: {db_err}")
+
             response = await self.llm_model.chat_completion_async(
                 user_message=prompt,
                 tools=tools if tools else None,
@@ -1035,8 +1044,14 @@ class SmartTradingAgent(BaseAgent):
         content = response.get('content', '')
         logger.info(f"LLM Response: {content[:200]}...")
         
-        # 记录消息到对话历史
+        # 记录消息到对话历史 (in-memory)
         self.add_message("assistant", content)
+
+        # Persist assistant message to DB
+        try:
+            ConversationRepository.add_message(self.agent_id, "assistant", content)
+        except Exception as db_err:
+            logger.warning(f"Failed to persist assistant message to DB: {db_err}")
         
         # 检查是否有工具调用
         tool_calls = response.get('tool_calls', [])
@@ -1056,6 +1071,21 @@ class SmartTradingAgent(BaseAgent):
                 arguments = json.loads(tool_call['function']['arguments'])
                 
                 logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+
+                # Persist tool call to DB (pending)
+                db_tool_id = f"tc_{uuid4().hex[:12]}"
+                try:
+                    ToolCallRepository.create({
+                        'id': db_tool_id,
+                        'agent_id': self.agent_id,
+                        'conversation_id': None,
+                        'name': tool_name,
+                        'arguments': arguments,
+                        'status': 'pending',
+                    })
+                except Exception as db_err:
+                    logger.warning(f"Failed to persist tool call to DB: {db_err}")
+                    db_tool_id = None
                 
                 result = await executor.execute_tool_call(
                     tool_name=tool_name,
@@ -1064,6 +1094,15 @@ class SmartTradingAgent(BaseAgent):
                 )
                 
                 results.append(result)
+
+                # Update tool call result in DB
+                if db_tool_id:
+                    try:
+                        tc_status = 'success' if result['status'] == 'success' else 'failed'
+                        result_str = json.dumps(result.get('result'), ensure_ascii=False) if result.get('result') else (result.get('error') or '')
+                        ToolCallRepository.update_result(db_tool_id, result_str, tc_status)
+                    except Exception as db_err:
+                        logger.warning(f"Failed to update tool call result in DB: {db_err}")
                 
                 # 记录工具调用到Agent统计
                 self.record_tool_call(
@@ -1073,6 +1112,36 @@ class SmartTradingAgent(BaseAgent):
                     error=result.get('error'),
                     duration_ms=result.get('execution_time', 0) * 1000
                 )
+
+                # Persist trading signal to DB when action tools are executed
+                _action_map = {
+                    'open_long': 'LONG', 'open_short': 'SHORT',
+                    'close_position': 'CLOSE', 'close_long': 'CLOSE',
+                    'close_short': 'CLOSE',
+                }
+                mapped_action = _action_map.get(tool_name.lower())
+                if mapped_action is None and tool_name.lower() in ('create_order', 'place_order'):
+                    side = str(arguments.get('side', '')).upper()
+                    mapped_action = 'LONG' if side == 'BUY' else 'SHORT' if side == 'SELL' else None
+                if mapped_action:
+                    try:
+                        current_price = markets[0].current_price if markets else None
+                        SignalRepository.create({
+                            'agent_id': self.agent_id,
+                            'action': mapped_action,
+                            'reason': content[:500] if content else None,
+                            'take_profit': arguments.get('take_profit') or arguments.get('takeProfit'),
+                            'stop_loss': arguments.get('stop_loss') or arguments.get('stopLoss'),
+                            'confidence': None,
+                            'indicators_snapshot': {
+                                'price': current_price,
+                                'symbol': arguments.get('symbol'),
+                                'amount': arguments.get('amount'),
+                            },
+                        })
+                        logger.info(f"Persisted signal: {mapped_action} for {arguments.get('symbol')}")
+                    except Exception as db_err:
+                        logger.warning(f"Failed to persist signal to DB: {db_err}")
                 
                 # 构建工具执行结果摘要
                 if result['status'] == 'success':
@@ -1092,10 +1161,14 @@ class SmartTradingAgent(BaseAgent):
             if tool_results_summary:
                 tool_results_msg = "工具执行结果:\n" + "\n".join(tool_results_summary)
                 self.add_message("system", tool_results_msg)
+                # Persist system summary to DB
+                try:
+                    ConversationRepository.add_message(self.agent_id, "system", tool_results_msg)
+                except Exception as db_err:
+                    logger.warning(f"Failed to persist tool summary to DB: {db_err}")
                 logger.info(f"Tool execution summary: {tool_results_msg}")
                 
                 # 可选：让LLM查看工具执行结果并给出反馈
-                # 这样LLM可以基于执行结果调整后续决策
                 try:
                     feedback_prompt = f"""
 以上工具已执行完成。请总结执行情况：
@@ -1112,6 +1185,10 @@ class SmartTradingAgent(BaseAgent):
                     if feedback_content:
                         logger.info(f"LLM Feedback: {feedback_content[:200]}...")
                         self.add_message("assistant", feedback_content)
+                        try:
+                            ConversationRepository.add_message(self.agent_id, "assistant", feedback_content)
+                        except Exception as db_err:
+                            logger.warning(f"Failed to persist feedback to DB: {db_err}")
                 except Exception as e:
                     logger.error(f"Error getting LLM feedback: {e}")
         else:
