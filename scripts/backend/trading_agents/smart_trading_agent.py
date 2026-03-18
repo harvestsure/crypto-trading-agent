@@ -573,170 +573,40 @@ class SmartTradingAgent(BaseAgent):
             return symbol.split('/')[1]
         return 'USDT'
     
-    def _summarize_indicator_trend(self, indicator_name: str, data: List[float]) -> str:
-        """
-        将指标数据总结为趋势描述，减少token消耗
-        """
-        if not data or len(data) < 2:
-            return f"{indicator_name}: 数据不足"
-        
-        current = data[-1]
-        previous = data[-2]
-        change = current - previous
-        change_pct = (change / previous * 100) if previous != 0 else 0
-        
-        # 判断趋势
-        if len(data) >= 5:
-            recent_trend = data[-5:]
-            is_rising = all(recent_trend[i] <= recent_trend[i+1] for i in range(len(recent_trend)-1))
-            is_falling = all(recent_trend[i] >= recent_trend[i+1] for i in range(len(recent_trend)-1))
-            trend = "上升" if is_rising else "下降" if is_falling else "震荡"
-        else:
-            trend = "上升" if change > 0 else "下降"
-        
-        # 特殊指标的额外判断
-        extra_info = ""
-        if indicator_name == "RSI":
-            if current > 70:
-                extra_info = " [超买区]"
-            elif current < 30:
-                extra_info = " [超卖区]"
-        elif indicator_name == "MACD_Histogram":
-            if current > 0 and previous <= 0:
-                extra_info = " [金叉]"
-            elif current < 0 and previous >= 0:
-                extra_info = " [死叉]"
-        
-        return f"{indicator_name}: {current:.2f} (趋势: {trend}, 变化: {change:+.2f}/{change_pct:+.2f}%){extra_info}"
-    
-    def _format_indicators_summary(self, indicators: Dict[str, Any]) -> str:
-        """
-        将指标数据格式化为简洁的总结
-        """
-        if not indicators:
-            return "技术指标: 无数据"
-        
-        summary_lines = []
-        for key, value in indicators.items():
-            if isinstance(value, list) and value:
-                summary_lines.append(self._summarize_indicator_trend(key, value))
-            elif isinstance(value, (int, float)):
-                summary_lines.append(f"{key}: {value:.2f}")
-        
-        return "\n".join(summary_lines)
-    
     def _calculate_indicators(self, symbol: str) -> Dict[str, Any]:
         """
-        获取指标数据（从DataFrame中读取）
-        根据 self.indicators 列表动态计算指定的指标
-        返回最近N个数据点的序列数据（N由indicator_window_size配置）
+        Build the full institutional indicator dict for a symbol.
+        Directly invokes IndicatorCalculator.calculate_all() on the stored kline
+        DataFrame so the result is always aligned with the new prompt format.
+        Falls back to an empty dict if not enough data is available.
         """
-        indicators = {}
-        
+        from utils.indicator_calculator import IndicatorCalculator as IC
+
         df = self.dfs.get(symbol)
-        if df is None or len(df) == 0:
-            return indicators
-        
-        # 获取最近N条数据
-        df_tail = df.tail(self.indicator_window_size)
-        
-        # 根据 self.indicators 列表动态收集指标
-        for indicator_name in self.indicators:
-            indicator_lower = indicator_name.lower()
-            
-            # RSI
-            if indicator_lower == 'rsi' and 'RSI' in df.columns:
-                rsi_data = df_tail['RSI'].dropna().tolist()
-                if rsi_data:
-                    indicators['RSI'] = rsi_data
-            
-            # EMA
-            elif indicator_lower == 'ema':
-                if 'EMA_20' in df.columns:
-                    ema20_data = df_tail['EMA_20'].dropna().tolist()
-                    if ema20_data:
-                        indicators['EMA_20'] = ema20_data
-                if 'EMA_50' in df.columns:
-                    ema50_data = df_tail['EMA_50'].dropna().tolist()
-                    if ema50_data:
-                        indicators['EMA_50'] = ema50_data
-            
-            # SMA
-            elif indicator_lower == 'sma':
-                if 'SMA_20' in df.columns:
-                    sma20_data = df_tail['SMA_20'].dropna().tolist()
-                    if sma20_data:
-                        indicators['SMA_20'] = sma20_data
-                if 'SMA_50' in df.columns:
-                    sma50_data = df_tail['SMA_50'].dropna().tolist()
-                    if sma50_data:
-                        indicators['SMA_50'] = sma50_data
-            
-            # MACD
-            elif indicator_lower == 'macd':
-                if 'MACD' in df.columns:
-                    macd_data = df_tail['MACD'].dropna().tolist()
-                    if macd_data:
-                        indicators['MACD'] = macd_data
-                if 'MACD_Signal' in df.columns:
-                    signal_data = df_tail['MACD_Signal'].dropna().tolist()
-                    if signal_data:
-                        indicators['MACD_Signal'] = signal_data
-                if 'MACD_Histogram' in df.columns:
-                    hist_data = df_tail['MACD_Histogram'].dropna().tolist()
-                    if hist_data:
-                        indicators['MACD_Histogram'] = hist_data
-            
-            # Bollinger Bands
-            elif indicator_lower in ['bb', 'bollinger']:
-                if 'BB_Upper' in df.columns:
-                    bb_upper = df_tail['BB_Upper'].dropna().tolist()
-                    if bb_upper:
-                        indicators['BB_Upper'] = bb_upper
-                if 'BB_Middle' in df.columns:
-                    bb_middle = df_tail['BB_Middle'].dropna().tolist()
-                    if bb_middle:
-                        indicators['BB_Middle'] = bb_middle
-                if 'BB_Lower' in df.columns:
-                    bb_lower = df_tail['BB_Lower'].dropna().tolist()
-                    if bb_lower:
-                        indicators['BB_Lower'] = bb_lower
-            
-            # ATR
-            elif indicator_lower == 'atr' and 'ATR' in df.columns:
-                atr_data = df_tail['ATR'].dropna().tolist()
-                if atr_data:
-                    indicators['ATR'] = atr_data
-            
-            # KDJ / Stochastic
-            elif indicator_lower in ['kdj', 'stoch', 'stochastic']:
-                if 'K' in df.columns:
-                    k_data = df_tail['K'].dropna().tolist()
-                    if k_data:
-                        indicators['K'] = k_data
-                if 'D' in df.columns:
-                    d_data = df_tail['D'].dropna().tolist()
-                    if d_data:
-                        indicators['D'] = d_data
-            
-            # ADX
-            elif indicator_lower == 'adx' and 'ADX' in df.columns:
-                adx_data = df_tail['ADX'].dropna().tolist()
-                if adx_data:
-                    indicators['ADX'] = adx_data
-            
-            # Volume
-            elif indicator_lower == 'volume':
-                if 'Volume' in df.columns:
-                    vol_data = df_tail['Volume'].dropna().tolist()
-                    if vol_data:
-                        indicators['Volume'] = vol_data
-                if 'AvgVolume_20' in df.columns:
-                    avg_vol_data = df_tail['AvgVolume_20'].dropna().tolist()
-                    if avg_vol_data:
-                        indicators['AvgVolume_20'] = avg_vol_data
-        
-        return indicators
+        if df is None or len(df) < 52:
+            return {}
+
+        ohlcv = []
+        for idx, row in df.iterrows():
+            ohlcv.append([
+                int(idx.timestamp() * 1000),
+                float(row['open']),
+                float(row['high']),
+                float(row['low']),
+                float(row['close']),
+                float(row['volume']),
+            ])
+
+        result = IC.calculate_all(ohlcv)
+
+        # Attach cached pivot/regime metadata so _build_llm_prompt can read it
+        if not result:
+            result = {}
+        self._last_regime = result.get('regime', 'unknown')
+        self._last_pivots = result.get('pivots', {})
+        self._last_bb_squeeze = result.get('bb_squeeze', False)
+
+        return result
     
     
     async def _process_klines_batch(self, symbol: str, klines: List[List], is_history: bool = False):
@@ -1162,7 +1032,7 @@ BB Squeeze    : {bb_squeeze_global}
 
 ═══════════════════════════════════════════════
  INSTRUCTIONS
-═══════════════════════════════════════════════
+══���════════════════════════════════════════════
 1. Assess the market regime using the data above.
 2. For each instrument, work through the 8-criterion setup checklist.
 3. If a valid setup exists (5+/8 criteria), calculate position size using 1.5×ATR stop.
