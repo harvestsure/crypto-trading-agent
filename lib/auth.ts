@@ -1,8 +1,30 @@
 /**
- * Authentication API with Cookie-based authentication
+ * Authentication API with Cookie-based authentication.
+ * Falls back to demo mode when the backend is unreachable.
  */
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+
+// ---------------------------------------------------------------------------
+// Demo user — used when the backend is offline / not configured
+// ---------------------------------------------------------------------------
+const DEMO_USER: User = {
+  id: "demo-user-001",
+  username: "demo",
+  email: "demo@cryptoagent.ai",
+  full_name: "Demo User",
+  created_at: new Date().toISOString(),
+}
+
+const DEMO_TOKEN = "demo-token-preview-mode"
+
+function isDemoCredentials(username: string, password: string) {
+  return username === "demo" && password === "demo"
+}
+
+function isDemoToken(token: string | null) {
+  return token === DEMO_TOKEN
+}
 
 export interface User {
   id: string
