@@ -29,7 +29,7 @@ export function OrdersTable({ agentId }: OrdersTableProps) {
       </CardHeader>
       <CardContent>
         {isLoading ? (
-          <div className="space-y-2">
+          <div className="space-y-1">
             {Array.from({ length: 4 }).map((_, i) => (
               <Skeleton key={i} className="h-9 w-full" />
             ))}

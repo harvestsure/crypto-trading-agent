@@ -149,7 +149,7 @@ function ConversationTab({ agentId, isConnected }: { agentId: string; isConnecte
           <RefreshCw className={cn("h-3 w-3", isLoading && "animate-spin")} />
         </Button>
       </div>
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 h-full min-h-0">
         <div className="flex flex-col gap-2 p-3">
           {conversations.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">

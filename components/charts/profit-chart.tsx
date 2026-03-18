@@ -56,7 +56,7 @@ export function ProfitChart({ data, title = "Profit & Loss" }: ProfitChartProps)
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="h-62.5 w-full">
+        <div className="h-60 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
               <defs>

@@ -332,7 +332,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const isProfitable = pnl >= 0
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full">
       {/* Page Header */}
       <div className="flex flex-row items-center justify-between gap-3 mb-2 py-2 border-b">
         <div className="px-6">
@@ -406,7 +406,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
       <div className="flex-1 min-h-0 flex gap-3 p-4 overflow-hidden">
 
         {/* Left Panel: Chart + Stats + Orders (2/3 width) — scrolls independently */}
-        <div className="flex flex-col gap-3 flex-[2] min-w-0 overflow-y-auto min-h-0">
+        <div className="flex flex-col gap-3 flex-2 min-w-0 min-h-0">
 
           {/* Top row: Chart + Balance */}
           <div className="grid grid-cols-3 gap-3 shrink-0" style={{ height: "340px" }}>
@@ -467,7 +467,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
           </div>
 
           {/* Second row: Profit Chart + AI Summary */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-1">
             <div className="col-span-2">
               <ProfitChart data={profitData} title="Profit Curve" />
             </div>

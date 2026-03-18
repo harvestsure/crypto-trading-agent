@@ -141,7 +141,7 @@ export function KlineChart({ agentId, symbol, timeframe }: KlineChartProps) {
       {/* Chart */}
       <svg
         viewBox={`0 0 ${klines.length * (candleWidth + 2)} ${chartHeight}`}
-        className="w-full h-[300px]"
+        className="w-full h-75"
         preserveAspectRatio="none"
       >
         {/* Grid lines */}
@@ -198,7 +198,7 @@ export function KlineChart({ agentId, symbol, timeframe }: KlineChartProps) {
       </svg>
 
       {/* Price Scale */}
-      <div className="absolute right-0 top-0 flex h-[300px] flex-col justify-between py-1 text-right text-xs text-muted-foreground">
+      <div className="absolute right-0 top-0 flex h-75 flex-col justify-between py-1 text-right text-xs text-muted-foreground">
         <span>${maxPrice.toFixed(2)}</span>
         <span>${((maxPrice + minPrice) / 2).toFixed(2)}</span>
         <span>${minPrice.toFixed(2)}</span>
