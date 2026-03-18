@@ -26,7 +26,16 @@ function isDemoToken(token: string | null) {
   return token === DEMO_TOKEN
 }
 
-export interface User {
+// Base headers applied to every API request.
+// ngrok-skip-browser-warning bypasses the ngrok browser interstitial page
+// that otherwise blocks cross-origin fetch calls from the v0 preview.
+function apiHeaders(extra: Record<string, string> = {}): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    "ngrok-skip-browser-warning": "true",
+    ...extra,
+  }
+}
   id: string
   username: string
   email: string
@@ -130,8 +139,8 @@ class AuthAPI {
     try {
       response = await fetch(`${API_URL}/api/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // Important for cookies
+        headers: apiHeaders(),
+        credentials: "include",
         body: JSON.stringify(data),
       })
     } catch (error) {
@@ -165,8 +174,8 @@ class AuthAPI {
     try {
       response = await fetch(`${API_URL}/api/auth/login`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // Important for cookies
+        headers: apiHeaders(),
+        credentials: "include",
         body: JSON.stringify(data),
       })
     } catch (error) {
@@ -201,9 +210,7 @@ class AuthAPI {
         try {
           await fetch(`${API_URL}/api/auth/logout`, {
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+            headers: apiHeaders({ Authorization: `Bearer ${token}` }),
             credentials: "include",
           })
         } catch (error) {
@@ -222,9 +229,7 @@ class AuthAPI {
 
     try {
       const response = await fetch(`${API_URL}/api/auth/me`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: apiHeaders({ Authorization: `Bearer ${token}` }),
         credentials: "include",
       })
 
@@ -250,9 +255,7 @@ class AuthAPI {
 
     try {
       const response = await fetch(`${API_URL}/api/auth/verify`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: apiHeaders({ Authorization: `Bearer ${token}` }),
         credentials: "include",
       })
 

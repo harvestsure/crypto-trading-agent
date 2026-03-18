@@ -198,7 +198,7 @@ def create_app():
     # Create FastAPI app with lifespan
     app = FastAPI(title="CryptoAgent API", lifespan=lifespan)
     
-    # CORS configuration
+    # CORS configuration — allow localhost dev, ngrok tunnels, and v0/Vercel preview origins
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[
@@ -206,6 +206,9 @@ def create_app():
             "http://127.0.0.1:3000",
             "https://localhost:3000",
         ],
+        # Also allow any origin so ngrok + v0 preview domains work without enumeration.
+        # In production, replace allow_origins with your exact frontend domain and remove allow_origin_regex.
+        allow_origin_regex=r"https?://.*\.(vusercontent\.net|ngrok\.io|ngrok-free\.app|ngrok-free\.dev|vercel\.app)$",
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

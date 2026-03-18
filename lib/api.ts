@@ -27,6 +27,8 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}, retries 
       if (!headers.has("Content-Type")) {
         headers.set("Content-Type", "application/json")
       }
+      // Bypass ngrok browser interstitial for cross-origin preview fetches
+      headers.set("ngrok-skip-browser-warning", "true")
 
       if (token) {
         headers.set("Authorization", `Bearer ${token}`)
