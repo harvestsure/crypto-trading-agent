@@ -1,6 +1,5 @@
 "use client"
 
-
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import useSWR from "swr"
@@ -16,8 +15,6 @@ import {
   Play,
   Pause,
   Settings,
-  TrendingUp,
-  TrendingDown,
   Activity,
   Zap,
   RefreshCw,
@@ -25,109 +22,29 @@ import {
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { KlineChart } from "@/components/charts/kline-chart"
-import { IndicatorPanel } from "@/components/agents/indicator-panel"
 import { LiveIndicatorPanel } from "@/components/agents/live-indicator-panel"
 import { AITradingSummary } from "@/components/agents/ai-trading-summary"
 import { ProfitChart } from "@/components/charts/profit-chart"
 import { OrdersTable } from "@/components/agents/orders-table"
 import { PositionPanel } from "@/components/agents/position-panel"
-import { TradingTimeline } from "@/components/agents/trading-timeline"
-import type { TimelineEvent } from "@/components/agents/trading-timeline"
+import { AgentConversationViewer } from "@/components/agents/agent-conversation-viewer"
 import { AgentLogs } from "@/components/agents/agent-logs"
 import { EditAgentModal } from "@/components/modals/edit-agent-modal"
 import { useAITrading } from "@/hooks/use-ai-trading"
 import { useKlineData } from "@/hooks/use-kline-data"
-import { calculateAllIndicators } from "@/lib/indicators"
-import { generateMockTradingActions } from "@/lib/mock-trading-data"
 import type { TradingAction } from "@/components/agents/action-history"
 import {
   useBackendStatus,
   useOpenPositions,
   useAgentBalance,
-  useAgentConversations,
-  useAgentToolCalls,
   useAgentProfitHistory,
   useTicker,
+  useAgentSignals,
 } from "@/hooks/use-agent-data"
 import { startAgent, stopAgent, triggerAnalysis, getAgent } from "@/lib/api"
-import type { Position, AccountBalance, ConversationMessage, ToolCall, ProfitDataPoint } from "@/lib/types"
+import type { Position, AccountBalance, ProfitDataPoint } from "@/lib/types"
 
 const TIMEFRAMES = ["1m", "5m", "15m", "1h", "4h", "1d"]
-
-const mockBalance: AccountBalance = {
-  totalBalance: 52450.8,
-  availableBalance: 47628.3,
-  usedMargin: 4822.5,
-  unrealizedPnl: 350,
-  realizedPnl: 1250.5,
-  todayPnl: 2.35,
-  weekPnl: 5.82,
-  monthPnl: 12.45,
-}
-
-const mockConversations: ConversationMessage[] = [
-  {
-    id: "1",
-    role: "system",
-    content:
-      "You are a professional cryptocurrency trading agent. Analyze market conditions using technical indicators.",
-    timestamp: new Date(Date.now() - 3600000),
-  },
-  {
-    id: "2",
-    role: "assistant",
-    content: "Analyzing BTC/USDT. RSI at 45.2 (neutral), ADX at 28.5 (trending), MACD showing bullish crossover.",
-    timestamp: new Date(Date.now() - 3500000),
-  },
-  {
-    id: "3",
-    role: "tool",
-    content: "Executing long position on BTC/USDT",
-    timestamp: new Date(Date.now() - 3400000),
-    toolCall: {
-      id: "tc1",
-      name: "create_order",
-      arguments: { symbol: "BTC/USDT", side: "buy", amount: 0.5, leverage: 10 },
-      result: "Order filled at $42,850",
-      status: "success",
-      timestamp: new Date(Date.now() - 3400000),
-    },
-  },
-]
-
-const mockToolCalls: ToolCall[] = [
-  {
-    id: "tc1",
-    name: "get_market_data",
-    arguments: { symbol: "BTC/USDT", timeframe: "1h" },
-    result: "Fetched 100 candles",
-    status: "success",
-    timestamp: new Date(Date.now() - 3600000),
-  },
-  {
-    id: "tc2",
-    name: "create_order",
-    arguments: { symbol: "BTC/USDT", side: "buy", amount: 0.5, leverage: 10 },
-    result: "Order filled at $42,850",
-    status: "success",
-    timestamp: new Date(Date.now() - 3400000),
-  },
-]
-
-const generateMockProfitData = (): ProfitDataPoint[] => {
-  const data: ProfitDataPoint[] = []
-  let balance = 50000
-  for (let i = 30; i >= 0; i--) {
-    balance += (Math.random() - 0.45) * 500
-    data.push({
-      timestamp: Date.now() - i * 24 * 60 * 60 * 1000,
-      balance: Math.round(balance * 100) / 100,
-      pnl: Math.round((balance - 50000) * 100) / 100,
-      pnlPercent: Math.round(((balance - 50000) / 50000) * 10000) / 100,
-    })
-  }
-  return data
-}
 
 interface AgentDetailClientProps {
   id: string
@@ -136,8 +53,6 @@ interface AgentDetailClientProps {
 // Normalize agent data from API or store
 function normalizeAgent(data: any) {
   if (!data) return null
-  // Ensure we return a full TradingAgent-shaped object so updates to the store
-  // keep types consistent (notably `createdAt` is required on `TradingAgent`).
   const createdAt = data.createdAt ?? data.created_at ? new Date(data.created_at ?? data.createdAt) : new Date()
   const performance = data.performance
     ? {
@@ -182,8 +97,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const models = useAppStore((state) => state.models)
   const exchanges = useAppStore((state) => state.exchanges)
 
-  console.log("[DEBUG] AgentDetailClient render, agents count:", agents.length, "agent id:", id)
-
   // Try to get agent from store first, then fetch from API
   const storeAgent = agents.find((a) => a.id === id)
   const { data: apiAgent, isLoading: isLoadingApiAgent } = useSWR(
@@ -197,12 +110,10 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   )
 
   const agent = storeAgent ? normalizeAgent(storeAgent) : apiAgent
-  console.log("[DEBUG] Current agent status:", agent?.status)
 
   // Sync apiAgent to store if agent was fetched from API
   useEffect(() => {
     if (apiAgent && !storeAgent) {
-      console.log("[DEBUG] Syncing apiAgent to store:", apiAgent)
       useAppStore.setState((state) => ({
         agents: [...state.agents, apiAgent],
       }))
@@ -212,7 +123,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const model = models.find((m) => m.id === agent?.modelId)
   const exchange = exchanges.find((e) => e.id === agent?.exchangeId)
 
-  // Normalize/defensive reads for agent fields coming from the store (snake_case vs camelCase)
   const indicators: string[] = ((agent as any)?.indicators as string[]) ?? []
   const perfRaw = (agent as any)?.performance ?? {}
   const totalTrades: number = (perfRaw?.totalTrades ?? perfRaw?.total_trades ?? 0) as number
@@ -226,34 +136,37 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   const [selectedSymbol, setSelectedSymbol] = useState<string>(agent?.symbols?.[0] ?? "")
 
   useEffect(() => {
-    // Default to the first symbol when agent loads or symbols change
     if (agent?.symbols && agent.symbols.length > 0) {
       setSelectedSymbol((s) => (s ? s : agent.symbols?.[0] ?? ""))
     }
   }, [agent?.symbols])
 
   useEffect(() => {
-    // Sync selected timeframe when agent loads or changes
     if (agent && agent.timeframe && agent.timeframe !== selectedTimeframe) {
       setSelectedTimeframe(agent.timeframe)
     }
   }, [agent?.timeframe])
 
-  // Real data hooks - only fetch when backend is connected
+  // Real data hooks
   const { positions: openPositions } = useOpenPositions(id, backendConnected && !!agent)
   const { balance: realBalance } = useAgentBalance(id, backendConnected && !!agent)
-  const { conversations: realConversations } = useAgentConversations(id, backendConnected && !!agent)
-  const { toolCalls: realToolCalls } = useAgentToolCalls(id, backendConnected && !!agent)
   const { profitHistory: realProfitHistory } = useAgentProfitHistory(id, 30, backendConnected && !!agent)
   const { ticker } = useTicker(id, selectedSymbol ?? agent?.symbols?.[0] ?? "", backendConnected && !!agent)
+  const { signals: realSignals } = useAgentSignals(id, backendConnected && !!agent)
 
-  // Use real data when available, otherwise use mock data
-  const positions = (openPositions.length > 0 ? openPositions : [])
-  const balance = realBalance ? realBalance : mockBalance
-  const conversations = realConversations.length > 0 ? realConversations : mockConversations
-  const toolCalls = realToolCalls.length > 0 ? realToolCalls : mockToolCalls
-  const [mockProfitData] = useState<ProfitDataPoint[]>(generateMockProfitData())
-  const profitData = realProfitHistory.length > 0 ? realProfitHistory : mockProfitData
+  // Use real data; fall back gracefully to empty states when offline
+  const positions = openPositions
+  const balance = realBalance ?? {
+    totalBalance: 0,
+    availableBalance: 0,
+    usedMargin: 0,
+    unrealizedPnl: 0,
+    realizedPnl: 0,
+    todayPnl: 0,
+    weekPnl: 0,
+    monthPnl: 0,
+  } as AccountBalance
+  const profitData = realProfitHistory
 
   // Price state
   const [currentPrice, setCurrentPrice] = useState<number | null>(null)
@@ -275,87 +188,43 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
     autoSubscribe: !!agent && backendConnected,
   })
 
-  // AI Trading hook
+  // AI Trading hook (for indicators only)
   const aiTrading = useAITrading({
     symbol: selectedSymbol ?? "",
     timeframe: selectedTimeframe ?? "1h",
     customPrompt: agent?.prompt,
     riskTolerance: "medium",
-    autoAnalyze: false, // Manual trigger only
+    autoAnalyze: false,
   })
 
   // Calculate real-time indicators
   const liveIndicators = liveKlines.length > 50 ? aiTrading.calculateIndicators(liveKlines) : undefined
 
-  // Trading actions history
-  const [tradingActions, setTradingActions] = useState<TradingAction[]>(() => {
-    // Initialize with some mock data for demonstration
-    return generateMockTradingActions(12, selectedSymbol ?? agent?.symbols?.[0])
-  })
-
-  // Convert trading actions to timeline events
-  const timelineEvents: TimelineEvent[] = tradingActions.map((action) => ({
-    id: action.id,
-    timestamp: action.timestamp,
-    type: "execution" as const,
-    action: action.action.toLowerCase().replace(/_/g, "_") as any,
-    reason: action.reasoning,
-    confidence: action.confidence,
-    price: action.price,
-    takeProfit: action.takeProfit,
-    stopLoss: action.stopLoss,
-    executionStatus: action.result?.status,
-    pnl: action.result?.pnl,
-    pnlPercent: action.result?.pnlPercent,
-    positionSize: action.positionSize,
-    symbol: action.symbol,
+  // Convert real signals to TradingAction format for AITradingSummary
+  const tradingActions: TradingAction[] = realSignals.map((sig: any) => ({
+    id: String(sig.id),
+    timestamp: sig.timestamp ? new Date(sig.timestamp) : new Date(),
+    action: sig.action as any,
+    symbol: (sig.indicators_snapshot?.symbol as string) ?? selectedSymbol ?? "",
+    confidence: sig.confidence ?? 0.5,
+    reasoning: sig.reason ?? "",
+    price: (sig.indicators_snapshot?.price as number) ?? undefined,
+    positionSize: (sig.indicators_snapshot?.amount as number) ?? undefined,
+    stopLoss: sig.stop_loss ?? undefined,
+    takeProfit: sig.take_profit ?? undefined,
+    result: { status: "executed" as const },
   }))
-
-  // Handle AI analysis trigger
-  const handleAIAnalysis = useCallback(async () => {
-    if (liveKlines.length < 50) {
-      console.log("[v0] Insufficient kline data for analysis")
-      return
-    }
-
-    const result = await aiTrading.analyze(liveKlines)
-    if (result) {
-      // Add to action history
-      const newAction: TradingAction = {
-        id: `action_${Date.now()}`,
-        timestamp: result.timestamp,
-        action: result.decision.action,
-        symbol: selectedSymbol ?? "",
-        confidence: result.decision.confidence,
-        reasoning: result.decision.reasoning,
-        price: currentPrice ?? undefined,
-        positionSize: result.decision.positionSize,
-        stopLoss: result.decision.stopLoss,
-        takeProfit: result.decision.takeProfit,
-        result: {
-          status: "pending",
-        },
-      }
-
-      setTradingActions((prev) => [newAction, ...prev])
-    }
-  }, [liveKlines, aiTrading, selectedSymbol, currentPrice])
 
   // Update price from ticker
   useEffect(() => {
     if (!ticker) return
-
-    // Normalize last price
     const last = Number(ticker.last ?? ticker.close ?? (ticker.info && (ticker.info.lastPrice || ticker.info.last_price)) ?? NaN)
     if (!Number.isFinite(last)) return
-
     const prev = currentPrice
-    // Prefer percentage field from ticker if available (ccxt uses 'percentage')
     let pct: number | null = null
     if (ticker.percentage != null) {
       pct = Number(ticker.percentage)
     } else if (ticker.change != null) {
-      // 'change' can be absolute price change; convert to percent if we have a previous price
       const changeVal = Number(ticker.change)
       if (Number.isFinite(changeVal) && prev && prev !== 0) {
         pct = (changeVal / prev) * 100
@@ -363,7 +232,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
     } else if (prev && prev !== 0) {
       pct = ((last - prev) / prev) * 100
     }
-
     setCurrentPrice(last)
     setPriceChange(Number.isFinite(pct ?? NaN) ? Math.round((pct as number) * 100) / 100 : null)
   }, [ticker])
@@ -375,12 +243,9 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
       setCurrentPrice((prev) => {
         const base = prev ?? 43250.5
         const next = Math.round((base + (Math.random() - 0.5) * 100) * 100) / 100
-        // compute percent change relative to base price
         if (base && base !== 0) {
           const change = ((next - base) / base) * 100
           setPriceChange(Math.round(change * 100) / 100)
-        } else {
-          setPriceChange(null)
         }
         return next
       })
@@ -390,29 +255,20 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
 
   const handleToggle = useCallback(async () => {
     if (!agent) return
-
     const isRunning = agent.status === "running"
     const newStatus = isRunning ? "paused" : "running"
 
-    console.log("[DEBUG] handleToggle called, isRunning:", isRunning, "newStatus:", newStatus)
-
-    // Update store immediately for responsiveness
     useAppStore.setState((state) => ({
       agents: state.agents.map((a) =>
         a.id === agent.id ? { ...a, status: newStatus } : a
       ),
     }))
 
-    console.log("[DEBUG] Store updated, new agents:", useAppStore.getState().agents)
-
-    // Call API to actually start/stop the agent
     if (backendConnected) {
       try {
         if (isRunning) {
           const result = await stopAgent(agent.id)
           if (result.error) {
-            console.error("[v0] Failed to stop agent:", result.error)
-            // Revert on error
             useAppStore.setState((state) => ({
               agents: state.agents.map((a) =>
                 a.id === agent.id ? { ...a, status: "running" } : a
@@ -422,8 +278,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
         } else {
           const result = await startAgent(agent.id)
           if (result.error) {
-            console.error("[v0] Failed to start agent:", result.error)
-            // Revert on error
             useAppStore.setState((state) => ({
               agents: state.agents.map((a) =>
                 a.id === agent.id ? { ...a, status: "paused" } : a
@@ -432,8 +286,6 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
           }
         }
       } catch (error) {
-        console.error("[v0] Failed to toggle agent:", error)
-        // Revert on error
         useAppStore.setState((state) => ({
           agents: state.agents.map((a) =>
             a.id === agent.id ? { ...a, status: isRunning ? "running" : "paused" } : a
@@ -445,15 +297,11 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
 
   const handleTriggerAnalysis = useCallback(async () => {
     if (!agent || !backendConnected) return
-
     setIsAnalyzing(true)
     try {
-      const result = await triggerAnalysis(agent.id)
-      if (result.data) {
-        console.log("[v0] Analysis result:", result.data)
-      }
+      await triggerAnalysis(agent.id)
     } catch (error) {
-      console.error("[v0] Analysis failed:", error)
+      // silent
     } finally {
       setIsAnalyzing(false)
     }
@@ -486,12 +334,12 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
   return (
     <div className="flex flex-col h-full">
       {/* Page Header */}
-      <div className="flex flex-row items-center justify-between gap-3 mb-2  py-2 border-b">
+      <div className="flex flex-row items-center justify-between gap-3 mb-2 py-2 border-b">
         <div className="px-6">
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-2xl font-bold">{agent.name}</h1>
+          <div className="flex items-center gap-3 mb-1">
+            <h1 className="text-2xl font-bold font-sans">{agent.name}</h1>
           </div>
-          <p className="text-muted-foreground">{(agent.symbols ?? []).join(", ")} · {agent.timeframe}</p>
+          <p className="text-muted-foreground text-sm">{(agent.symbols ?? []).join(", ")} · {agent.timeframe}</p>
         </div>
 
         {/* Top Control Bar */}
@@ -526,15 +374,15 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={handleAIAnalysis}
-              disabled={aiTrading.isAnalyzing || liveKlines.length < 50}
+              onClick={handleTriggerAnalysis}
+              disabled={isAnalyzing || !backendConnected}
             >
-              {aiTrading.isAnalyzing ? (
+              {isAnalyzing ? (
                 <RefreshCw className="mr-1 h-3 w-3 animate-spin" />
               ) : (
                 <Zap className="mr-1 h-3 w-3" />
               )}
-              Analyze
+              Trigger
             </Button>
             <Button variant="outline" size="icon" onClick={() => setShowSettings(true)}>
               <Settings className="h-4 w-4" />
@@ -554,24 +402,25 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
         </div>
       </div>
 
-      {/* Scrollable Content Area */}
-      <div className="flex-1 overflow-auto flex flex-col p-4 gap-3">
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-auto flex gap-3 p-4 min-h-0">
 
+        {/* Left Panel: Chart + Stats + Orders (2/3 width) */}
+        <div className="flex flex-col gap-3 flex-[2] min-w-0">
 
-        {/* Main 3-Column Layout */}
-        <div className="grid gap-3 grid-cols-3 flex-1 min-h-0">
-          {/* Left: Chart + AI Trading Summary */}
-          <div className="space-y-3 min-h-0 flex flex-col overflow-hidden">
-            <Card className="flex-1 flex flex-col overflow-hidden max-h-96">
+          {/* Top row: Chart + Balance */}
+          <div className="grid grid-cols-3 gap-3">
+            {/* Chart */}
+            <Card className="col-span-2 flex flex-col overflow-hidden" style={{ height: "340px" }}>
               <CardHeader className="pb-2 shrink-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <CardTitle className="text-sm truncate">{selectedSymbol}</CardTitle>
                       <p className="text-sm font-bold text-foreground">
-                        {currentPrice != null ? `$${(currentPrice / 1000).toFixed(1)}K` : "—"}
+                        {currentPrice != null ? `$${currentPrice.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—"}
                       </p>
-                      <p className={cn("text-xs", priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground")}> 
+                      <p className={cn("text-xs", priceChange != null ? (priceChange >= 0 ? "text-success" : "text-destructive") : "text-muted-foreground")}>
                         {priceChange != null ? (priceChange >= 0 ? "+" : "") : ""}
                         {priceChange != null ? `${priceChange.toFixed(1)}%` : "--"}
                       </p>
@@ -595,7 +444,7 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className="flex-1 overflow-hidden">
+              <CardContent className="flex-1 overflow-hidden p-2">
                 <KlineChart
                   agentId={id}
                   symbol={selectedSymbol ?? agent.symbols?.[0] ?? ""}
@@ -603,41 +452,50 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
                 />
               </CardContent>
             </Card>
-            <div className="shrink-0">
+
+            {/* Position / Balance */}
+            <div className="overflow-auto" style={{ height: "340px" }}>
+              <PositionPanel
+                positions={positions}
+                balance={balance}
+                agentId={agent.id}
+                pnl={pnl}
+                totalTrades={totalTrades}
+                winRate={winRate}
+                lastSignal={lastSignal}
+                isProfitable={isProfitable}
+              />
+            </div>
+          </div>
+
+          {/* Second row: Profit Chart + AI Summary */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <ProfitChart data={profitData} title="Profit Curve" />
+            </div>
+            <div>
               <AITradingSummary actions={tradingActions} currentPositions={positions.length} />
             </div>
           </div>
 
-          {/* Middle: Profit Curve + AI Decision + Position */}
-          <div className="space-y-3 min-h-0 flex flex-col">
-            {/* Profit Curve */}
-            <ProfitChart data={profitData} title="Profit Curve" />
+          {/* Orders Table */}
+          <OrdersTable agentId={agent.id} />
 
-            <div className="flex-1 min-h-0 overflow-hidden">
-              <PositionPanel positions={positions} balance={balance} agentId={agent.id} />
-            </div>
-          </div>
-
-          {/* Right: Timeline 占据三行 */}
-          <div className="min-h-0 flex flex-col overflow-auto row-span-3">
-            <TradingTimeline events={timelineEvents} />
-          </div>
-
-          {/* Orders Table: 跨第一列和第二列下方 */}
-          <div className="col-span-2 mt-3">
-            <OrdersTable agentId={agent.id} />
-          </div>
+          {/* Details Drawer Trigger */}
+          <Button
+            onClick={() => setShowDetailDrawer(true)}
+            className="w-full shrink-0"
+            variant="outline"
+          >
+            <ChevronDown className="mr-2 h-4 w-4" />
+            Technical Indicators &amp; Logs
+          </Button>
         </div>
 
-        {/* Details Button */}
-        <Button
-          onClick={() => setShowDetailDrawer(true)}
-          className="w-full shrink-0"
-          variant="outline"
-        >
-          <ChevronDown className="mr-2 h-4 w-4" />
-          Additional Details (Technical Indicators, Logs)
-        </Button>
+        {/* Right Panel: Full-height LLM Conversation (1/3 width) */}
+        <div className="flex flex-col flex-1 min-w-0 min-h-0" style={{ minWidth: "320px", maxWidth: "420px" }}>
+          <AgentConversationViewer agentId={id} />
+        </div>
       </div>
 
       <EditAgentModal open={showSettings} onOpenChange={setShowSettings} agent={agent} />
