@@ -409,9 +409,9 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
         <div className="flex flex-col gap-3 flex-[2] min-w-0">
 
           {/* Top row: Chart + Balance */}
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-3" style={{ height: "340px" }}>
             {/* Chart */}
-            <Card className="col-span-2 flex flex-col overflow-hidden" style={{ height: "340px" }}>
+            <Card className="col-span-2 flex flex-col overflow-hidden h-full">
               <CardHeader className="pb-2 shrink-0">
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
@@ -454,18 +454,16 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
             </Card>
 
             {/* Position / Balance */}
-            <div className="overflow-auto" style={{ height: "340px" }}>
-              <PositionPanel
-                positions={positions}
-                balance={balance}
-                agentId={agent.id}
-                pnl={pnl}
-                totalTrades={totalTrades}
-                winRate={winRate}
-                lastSignal={lastSignal}
-                isProfitable={isProfitable}
-              />
-            </div>
+            <PositionPanel
+              positions={positions}
+              balance={balance}
+              agentId={agent.id}
+              pnl={pnl}
+              totalTrades={totalTrades}
+              winRate={winRate}
+              lastSignal={lastSignal}
+              isProfitable={isProfitable}
+            />
           </div>
 
           {/* Second row: Profit Chart + AI Summary */}
