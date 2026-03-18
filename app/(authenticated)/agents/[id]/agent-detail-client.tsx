@@ -403,10 +403,10 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
       </div>
 
       {/* Main Content Area — fills remaining viewport height, columns are independent scrollers */}
-      <div className="flex-1 min-h-0 flex gap-3 p-4 overflow-hidden">
+      <div className="flex-1 min-h-0 flex gap-3 p-4 overflow-hidden h-full">
 
         {/* Left Panel: Chart + Stats + Orders (2/3 width) — scrolls independently */}
-        <div className="flex flex-col gap-3 flex-[2] min-w-0 overflow-y-auto">
+        <div className="flex flex-col gap-3 flex-[2] min-w-0 overflow-y-auto min-h-0">
 
           {/* Top row: Chart + Balance */}
           <div className="grid grid-cols-3 gap-3 shrink-0" style={{ height: "340px" }}>
@@ -490,8 +490,8 @@ export default function AgentDetailClient({ id }: AgentDetailClientProps) {
           </Button>
         </div>
 
-        {/* Right Panel: Full-height LLM Conversation (1/3 width) — does NOT scroll, card scrolls internally */}
-        <div className="flex flex-col min-w-0 min-h-0 self-stretch overflow-hidden" style={{ minWidth: "300px", maxWidth: "400px", flex: "1" }}>
+        {/* Right Panel: Full-height LLM Conversation — does NOT scroll, card scrolls internally */}
+        <div className="h-full min-h-0 overflow-hidden flex flex-col" style={{ minWidth: "300px", maxWidth: "400px", flex: "1" }}>
           <AgentConversationViewer agentId={id} />
         </div>
       </div>
