@@ -325,7 +325,7 @@ export function AgentConversationViewer({ agentId }: AgentConversationViewerProp
   ]
 
   return (
-    <Card className="flex flex-col overflow-hidden" style={{ height: "100%" }}>
+    <Card className="flex flex-col overflow-hidden h-full">
       {/* Panel header */}
       <CardHeader className="pb-0 pt-3 px-4 shrink-0 border-b">
         <div className="flex items-center gap-2 mb-2">
@@ -360,9 +360,9 @@ export function AgentConversationViewer({ agentId }: AgentConversationViewerProp
         </div>
       </CardHeader>
 
-      {/* Tab content */}
-      <CardContent className="flex-1 min-h-0 p-0">
-        <div className="h-full">
+      {/* Tab content — must fill remaining height and scroll internally */}
+      <CardContent className="flex-1 min-h-0 p-0 overflow-hidden">
+        <div className="h-full overflow-hidden">
           {activeTab === "conversations" && <ConversationTab agentId={agentId} isConnected={isConnected} />}
           {activeTab === "tools"         && <ToolCallsTab agentId={agentId} />}
           {activeTab === "signals"       && <SignalsTab agentId={agentId} />}
