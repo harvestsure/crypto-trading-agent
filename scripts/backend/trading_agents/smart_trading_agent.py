@@ -895,91 +895,112 @@ class SmartTradingAgent(BaseAgent):
     
     async def _calculate_all_indicators(self, symbol: str):
         """
-        计算技术指标
-        仅计算 self.indicators 中指定的指标
+        Calculate the full institutional indicator suite using IndicatorCalculator.
+        Results are stored on self.dfs[symbol] for _calculate_indicators() to read.
         """
         try:
             df = self.dfs.get(symbol)
-            if df is None or len(df) < 20:
+            if df is None or len(df) < 52:
+                logger.debug(f"{symbol}: Not enough bars for full indicator suite ({len(df) if df is not None else 0} < 52)")
                 return
-            
-            df_copy = df.copy()
-            
-            # 根据 self.indicators 列表动态计算
-            for indicator_name in self.indicators:
-                indicator_lower = indicator_name.lower()
-                
-                # RSI
-                if indicator_lower == 'rsi':
-                    rsi = ta.rsi(df_copy['close'], length=14)
-                    if rsi is not None and len(rsi) > 0:
-                        self.dfs[symbol]['RSI'] = rsi
-                
-                # EMA
-                elif indicator_lower == 'ema':
-                    ema20 = ta.ema(df_copy['close'], length=20)
-                    ema50 = ta.ema(df_copy['close'], length=50)
-                    if ema20 is not None:
-                        self.dfs[symbol]['EMA_20'] = ema20
-                    if ema50 is not None:
-                        self.dfs[symbol]['EMA_50'] = ema50
-                
-                # SMA
-                elif indicator_lower == 'sma':
-                    sma20 = ta.sma(df_copy['close'], length=20)
-                    sma50 = ta.sma(df_copy['close'], length=50)
-                    if sma20 is not None:
-                        self.dfs[symbol]['SMA_20'] = sma20
-                    if sma50 is not None:
-                        self.dfs[symbol]['SMA_50'] = sma50
-                
-                # MACD
-                elif indicator_lower == 'macd':
-                    macd_result = ta.macd(df_copy['close'])
-                    if macd_result is not None and len(macd_result.columns) >= 3:
-                        self.dfs[symbol]['MACD'] = macd_result.iloc[:, 0]
-                        self.dfs[symbol]['MACD_Signal'] = macd_result.iloc[:, 1]
-                        self.dfs[symbol]['MACD_Histogram'] = macd_result.iloc[:, 2]
-                
-                # Bollinger Bands
-                elif indicator_lower in ['bb', 'bollinger']:
-                    bb_result = ta.bbands(df_copy['close'], length=20, std=2)
-                    if bb_result is not None and len(bb_result.columns) >= 3:
-                        self.dfs[symbol]['BB_Upper'] = bb_result.iloc[:, 0]
-                        self.dfs[symbol]['BB_Middle'] = bb_result.iloc[:, 1]
-                        self.dfs[symbol]['BB_Lower'] = bb_result.iloc[:, 2]
-                
-                # ATR
-                elif indicator_lower == 'atr':
-                    atr = ta.atr(df_copy['high'], df_copy['low'], df_copy['close'], length=14)
-                    if atr is not None:
-                        self.dfs[symbol]['ATR'] = atr
-                
-                # KDJ / Stochastic
-                elif indicator_lower in ['kdj', 'stoch', 'stochastic']:
-                    stoch_result = ta.stoch(df_copy['high'], df_copy['low'], df_copy['close'], k=14, d=3)
-                    if stoch_result is not None and len(stoch_result.columns) >= 2:
-                        self.dfs[symbol]['K'] = stoch_result.iloc[:, 0]
-                        self.dfs[symbol]['D'] = stoch_result.iloc[:, 1]
-                
-                # ADX
-                elif indicator_lower == 'adx':
-                    try:
-                        adx_result = ta.adx(df_copy['high'], df_copy['low'], df_copy['close'], length=14)
-                        adx_col = next((c for c in adx_result.columns if 'ADX' in c.upper()), None)
-                        if adx_col:
-                            self.dfs[symbol]['ADX'] = adx_result[adx_col]
-                    except Exception:
-                        pass
-                
-                # Volume
-                elif indicator_lower == 'volume':
-                    self.dfs[symbol]['Volume'] = df_copy['volume']
-                    self.dfs[symbol]['AvgVolume_20'] = df_copy['volume'].rolling(window=20).mean()
-            
-            logger.debug(f"{symbol}: Indicators calculated for {len(self.dfs[symbol])} rows")
+
+            # Build OHLCV list for IndicatorCalculator
+            ohlcv = []
+            for idx, row in df.iterrows():
+                ohlcv.append([
+                    int(idx.timestamp() * 1000),
+                    float(row['open']),
+                    float(row['high']),
+                    float(row['low']),
+                    float(row['close']),
+                    float(row['volume']),
+                ])
+
+            from utils.indicator_calculator import IndicatorCalculator as IC
+            result = IC.calculate_all(ohlcv)
+            if not result:
+                return
+
+            # Store scalar-compatible results as single-row appended to latest bar
+            # We store the full series where available, scalars as constants
+            n = len(df)
+            closes  = [r[4] for r in ohlcv]
+            highs   = [r[2] for r in ohlcv]
+            lows    = [r[3] for r in ohlcv]
+            volumes = [r[5] for r in ohlcv]
+            opens   = [r[1] for r in ohlcv]
+
+            import pandas as _pd
+            import math as _math
+
+            def _pad(lst, target):
+                diff = target - len(lst)
+                return ([float('nan')] * diff + list(lst)) if diff > 0 else list(lst)[-target:]
+
+            # Trend
+            self.dfs[symbol]['EMA_9']   = _pad(IC.ema_series(closes, 9), n)
+            self.dfs[symbol]['EMA_21']  = _pad(IC.ema_series(closes, 21), n)
+            self.dfs[symbol]['EMA_50']  = _pad(IC.ema_series(closes, 50), n)
+            self.dfs[symbol]['EMA_200'] = _pad(IC.ema_series(closes, 200), n) if n >= 200 else [float('nan')] * n
+            st_line, st_dir = IC.supertrend(highs, lows, closes)
+            self.dfs[symbol]['Supertrend']     = _pad(st_line, n)
+            self.dfs[symbol]['Supertrend_Dir'] = _pad(st_dir, n)
+            ichi = IC.ichimoku(highs, lows, closes)
+            self.dfs[symbol]['Ichi_Tenkan']  = _pad(ichi['tenkan'], n)
+            self.dfs[symbol]['Ichi_Kijun']   = _pad(ichi['kijun'], n)
+            self.dfs[symbol]['Ichi_SenkouA'] = _pad(ichi['senkou_a'], n)
+            self.dfs[symbol]['Ichi_SenkouB'] = _pad(ichi['senkou_b'], n)
+            self.dfs[symbol]['Ichi_Chikou']  = _pad(ichi['chikou'], n)
+
+            # Momentum
+            self.dfs[symbol]['RSI']          = _pad(IC.rsi(closes, 14), n)
+            stoch = IC.stoch_rsi(closes)
+            self.dfs[symbol]['StochRSI_K']   = _pad(stoch['stoch_k'], n)
+            self.dfs[symbol]['StochRSI_D']   = _pad(stoch['stoch_d'], n)
+            macd_d = IC.macd(closes)
+            self.dfs[symbol]['MACD']         = _pad(macd_d['macd'], n)
+            self.dfs[symbol]['MACD_Signal']  = _pad(macd_d['signal'], n)
+            self.dfs[symbol]['MACD_Histogram'] = _pad(macd_d['histogram'], n)
+            self.dfs[symbol]['Williams_R']   = _pad(IC.williams_r(highs, lows, closes), n)
+            self.dfs[symbol]['CMF']          = _pad(IC.cmf(highs, lows, closes, volumes), n)
+
+            # Volatility
+            self.dfs[symbol]['ATR']          = _pad(IC.atr(highs, lows, closes, 14), n)
+            bb = IC.bollinger_bands(closes)
+            self.dfs[symbol]['BB_Upper']     = _pad(bb['upper'], n)
+            self.dfs[symbol]['BB_Middle']    = _pad(bb['middle'], n)
+            self.dfs[symbol]['BB_Lower']     = _pad(bb['lower'], n)
+            self.dfs[symbol]['BB_PctB']      = _pad(bb['percent_b'], n)
+            self.dfs[symbol]['BB_BW']        = _pad(bb['bandwidth'], n)
+            kc = IC.keltner_channels(highs, lows, closes)
+            self.dfs[symbol]['KC_Upper']     = _pad(kc['upper'], n)
+            self.dfs[symbol]['KC_Lower']     = _pad(kc['lower'], n)
+            adx_d = IC.adx(highs, lows, closes)
+            self.dfs[symbol]['ADX']          = _pad(adx_d['adx'], n)
+            self.dfs[symbol]['Plus_DI']      = _pad(adx_d['plus_di'], n)
+            self.dfs[symbol]['Minus_DI']     = _pad(adx_d['minus_di'], n)
+            self.dfs[symbol]['Chop']         = _pad(IC.choppiness_index(highs, lows, closes), n)
+
+            # Volume
+            self.dfs[symbol]['OBV']          = _pad(IC.obv(closes, volumes), n)
+            self.dfs[symbol]['VWAP']         = _pad(IC.vwap(highs, lows, closes, volumes), n)
+            self.dfs[symbol]['MFI']          = _pad(IC.mfi(highs, lows, closes, volumes), n)
+            self.dfs[symbol]['Volume']       = volumes
+            self.dfs[symbol]['AvgVolume_20'] = _pad([sum(volumes[max(0,i-19):i+1])/min(20,i+1) for i in range(n)], n)
+
+            # Heikin Ashi (store HA close for smooth trend view)
+            ha = IC.heikin_ashi(opens, highs, lows, closes)
+            self.dfs[symbol]['HA_Close']     = _pad(ha['close'], n)
+            self.dfs[symbol]['HA_Open']      = _pad(ha['open'], n)
+
+            # Store latest regime + pivot metadata as agent attributes
+            self._last_regime = result.get('regime', 'unknown')
+            self._last_pivots = result.get('pivots', {})
+            self._last_bb_squeeze = result.get('bb_squeeze', False)
+
+            logger.debug(f"{symbol}: Full institutional indicator suite calculated. Regime={self._last_regime}")
         except Exception as e:
-            logger.error(f"{symbol}: Error calculating indicators: {e}", exc_info=True)
+            logger.error(f"{symbol}: Error in _calculate_all_indicators: {e}", exc_info=True)
     
     def _build_llm_prompt(
         self,
@@ -988,48 +1009,170 @@ class SmartTradingAgent(BaseAgent):
         account: AccountContext,
         orders: OrderContext
     ) -> str:
-        """构建LLM提示词"""
-        # 构建所有交易对的市场数据（使用优化后的显示）
-        markets_str = "\n\n".join([
-            market.to_llm_prompt(format_func=self._format_indicators_summary) 
-            for market in markets
-        ])
-        
+        """Build an institutional-grade structured prompt for the swing trading LLM."""
+
+        def _v(val, fmt=".4f") -> str:
+            """Format a value safely."""
+            try:
+                if val is None or (isinstance(val, float) and val != val):
+                    return "N/A"
+                return format(float(val), fmt)
+            except Exception:
+                return str(val)
+
+        def _indicator_block(symbol: str, ind: dict) -> str:
+            """Format indicator dict into a readable block for the LLM."""
+            price = ind.get('price', 'N/A')
+            atr_pct = ind.get('atr_pct', 'N/A')
+
+            # Trend
+            ema9  = _v(ind.get('ema_9'))
+            ema21 = _v(ind.get('ema_21'))
+            ema50 = _v(ind.get('ema_50'))
+            ema200 = _v(ind.get('ema_200'))
+            ema_stack = ind.get('ema_stack', 'N/A')
+            st_dir = ind.get('supertrend_dir', 'N/A')
+            st_val = _v(ind.get('supertrend'))
+            cloud = ind.get('price_vs_cloud', 'N/A')
+            tenkan = _v(ind.get('ichi_tenkan'))
+            kijun  = _v(ind.get('ichi_kijun'))
+            ska    = _v(ind.get('ichi_senkou_a'))
+            skb    = _v(ind.get('ichi_senkou_b'))
+
+            # Momentum
+            rsi   = _v(ind.get('rsi'), ".2f")
+            sk    = _v(ind.get('stoch_k'), ".2f")
+            sd    = _v(ind.get('stoch_d'), ".2f")
+            macd  = _v(ind.get('macd'))
+            msig  = _v(ind.get('macd_signal'))
+            mhist = _v(ind.get('macd_hist'))
+            mcross = ind.get('macd_cross', 'N/A')
+            wpr   = _v(ind.get('williams_r'), ".2f")
+            cmf   = _v(ind.get('cmf'), ".4f")
+
+            # Volatility
+            atr   = _v(ind.get('atr'))
+            bb_u  = _v(ind.get('bb_upper'))
+            bb_m  = _v(ind.get('bb_middle'))
+            bb_l  = _v(ind.get('bb_lower'))
+            bb_pb = _v(ind.get('bb_pct_b'), ".1f")
+            adx   = _v(ind.get('adx'), ".2f")
+            pdi   = _v(ind.get('plus_di'), ".2f")
+            mdi   = _v(ind.get('minus_di'), ".2f")
+            chop  = _v(ind.get('chop'), ".2f")
+            squeeze = "ACTIVE" if ind.get('bb_squeeze') else "inactive"
+
+            # Volume
+            obv   = _v(ind.get('obv'), ".0f")
+            vwap  = _v(ind.get('vwap'))
+            mfi   = _v(ind.get('mfi'), ".2f")
+            vol   = _v(ind.get('volume'), ".2f")
+            vol_ma = _v(ind.get('volume_ma20'), ".2f")
+            vol_r  = _v(ind.get('volume_ratio'), ".2f")
+
+            # Structure
+            ha_bull = ind.get('ha_bullish', False)
+            pivots = ind.get('pivots', {})
+            pp  = _v(pivots.get('pp'))
+            r1  = _v(pivots.get('r1'))
+            r2  = _v(pivots.get('r2'))
+            r3  = _v(pivots.get('r3'))
+            s1  = _v(pivots.get('s1'))
+            s2  = _v(pivots.get('s2'))
+            s3  = _v(pivots.get('s3'))
+
+            regime = ind.get('regime', 'unknown').upper()
+
+            return f"""
+--- {symbol} ({self.timeframe}) ---
+Price: {price}  |  ATR(14): {atr}  |  ATR%: {atr_pct}%  |  Regime: {regime}
+
+[TREND]
+  EMA Stack  : {ema9} / {ema21} / {ema50} / {ema200} ({ema_stack})
+  Supertrend : {st_val}  ({st_dir})
+  Ichimoku   : Tenkan={tenkan}  Kijun={kijun}  SpanA={ska}  SpanB={skb}
+  Price vs Cloud: {cloud}
+  BB Squeeze : {squeeze}
+
+[MOMENTUM]
+  RSI(14)    : {rsi}    StochRSI K/D: {sk} / {sd}
+  MACD       : {macd}  Signal: {msig}  Histogram: {mhist}  ({mcross})
+  Williams%R : {wpr}   CMF(20): {cmf}
+
+[VOLATILITY]
+  ATR(14)    : {atr}  ({atr_pct}% of price)
+  Bollinger  : U={bb_u}  M={bb_m}  L={bb_l}  %B={bb_pb}
+  ADX/DI     : ADX={adx}  +DI={pdi}  -DI={mdi}
+  Choppiness : {chop}  (< 38.2 trending | > 61.8 ranging)
+
+[VOLUME & ORDER FLOW]
+  OBV        : {obv}
+  VWAP       : {vwap}
+  MFI(14)    : {mfi}
+  Volume     : {vol}  |  MA20: {vol_ma}  |  Ratio: {vol_r}×
+
+[PRICE STRUCTURE]
+  Heikin Ashi: {"BULLISH candle" if ha_bull else "BEARISH candle"}
+  Pivot PP   : {pp}
+  Resistance : R1={r1}  R2={r2}  R3={r3}
+  Support    : S1={s1}  S2={s2}  S3={s3}
+"""
+
+        # Build market blocks
+        market_blocks = []
+        for market in markets:
+            block = _indicator_block(market.symbol, market.indicators)
+            # Append last 5 candle OHLCV for price action context
+            if market.klines:
+                candle_lines = []
+                for k in market.klines[-5:]:
+                    from datetime import datetime as _dt
+                    ts = _dt.fromtimestamp(k[0] / 1000).strftime('%m-%d %H:%M')
+                    candle_lines.append(f"  {ts}  O={k[1]:.4f}  H={k[2]:.4f}  L={k[3]:.4f}  C={k[4]:.4f}  V={k[5]:.2f}")
+                block += "\n[LAST 5 CANDLES]\n" + "\n".join(candle_lines) + "\n"
+            market_blocks.append(block)
+
+        markets_str = "\n".join(market_blocks)
+        regime_global = getattr(self, '_last_regime', 'unknown').upper()
+        bb_squeeze_global = "YES — BREAKOUT IMMINENT" if getattr(self, '_last_bb_squeeze', False) else "No"
+
         prompt = f"""
-{get_prompt_template()}
+═══════════════════════════════════════════════
+ SWING TRADING DECISION CYCLE
+ Time: {__import__('datetime').datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}
+ Instruments: {', '.join(self.symbols)}
+ Timeframe: {self.timeframe}
+═══════════════════════════════════════════════
 
-=== 监控的交易对 ===
-{', '.join(self.symbols)}
-
-=== 市场数据 ===
-{markets_str}
-
-{position.to_llm_prompt()}
-
+[ACCOUNT]
 {account.to_llm_prompt()}
+  Max position size : ${self.max_position_size}
+  Risk per trade    : {self.risk_per_trade * 100:.1f}% of equity
+  Max leverage      : {self.default_leverage}×
 
+[CURRENT POSITIONS & OPEN ORDERS]
+{position.to_llm_prompt()}
 {orders.to_llm_prompt()}
 
-配置参数:
-- 最大持仓规模: {self.max_position_size}
-- 单笔风险比例: {self.risk_per_trade * 100}%
-- 默认杠杆: {self.default_leverage}x
+[MARKET INTELLIGENCE]
+Global Regime : {regime_global}
+BB Squeeze    : {bb_squeeze_global}
 
-请分析以上所有交易对的市场状况，并决定下一步操作。你可以：
-1. 开多仓 (LONG) - 看涨时建立多头仓位（需指定symbol）
-2. 开空仓 (SHORT) - 看跌时建立空头仓位（需指定symbol）
-3. 平仓 (CLOSE) - 关闭当前持仓（需指定symbol）
-4. 设置条件止盈 (TAKE_PROFIT) - 价格达到目标时自动平仓
-5. 设置条件止损 (STOP_LOSS) - 价格跌破止损位时自动平仓
-6. 持有 (HOLD) - 保持当前状态，不做操作
+{markets_str}
 
-注意：
-- 如果已有未成交订单，请考虑是否需要取消或调整
-- 每次开仓后应立即设置止损止盈
-- 避免同时对同一交易对建立多个相同方向的仓位
+═══════════════════════════════════════════════
+ INSTRUCTIONS
+═══════════════════════════════════════════════
+1. Assess the market regime using the data above.
+2. For each instrument, work through the 8-criterion setup checklist.
+3. If a valid setup exists (5+/8 criteria), calculate position size using 1.5×ATR stop.
+4. If active positions exist, assess whether to hold, partial-close, adjust stop, or exit.
+5. Call get_swing_levels() BEFORE opening any new position to confirm key levels.
+6. Execute decisions using the available tools.
+7. Output your full analysis in the mandatory structured format.
 
-如果需要执行交易，请使用相应的工具函数，并务必指定正确的symbol参数。
-请给出你的分析和建议。
+Remember: If fewer than 5/8 criteria are met, the correct answer is HOLD.
+Risk-adjusted P&L consistency outperforms aggressive trading every time.
 """
         return prompt
     

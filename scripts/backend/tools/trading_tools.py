@@ -699,16 +699,321 @@ class CancelOrdersTool(BaseTool):
             return f'{{"status": "error", "message": "{str(e)}"}}'
 
 
+class ScaleInTool(BaseTool):
+    """
+    Scale into an existing position (pyramid / add-to-winner).
+    Institutional swing traders scale in at confirmed breakouts or pullbacks
+    to key EMA levels, increasing size when the trade is working.
+    """
+
+    def __init__(self, exchange: CommonExchange):
+        definition = ToolDefinition(
+            name="scale_in",
+            description=(
+                "Add to an existing profitable position (scale in / pyramid). "
+                "Use when price has confirmed the trend direction and is pulling back to a key level "
+                "(e.g. EMA-21, Kijun, VWAP). Adds additional contracts to the existing position."
+            ),
+            parameters=[
+                ToolParameter("symbol", "string", "Trading pair, e.g. BTC/USDT", required=True),
+                ToolParameter("side", "string", "Direction to add: 'long' or 'short'", required=True, enum=["long", "short"]),
+                ToolParameter("amount", "number", "Number of contracts to add", required=True),
+                ToolParameter("price", "number", "Limit price. Omit for market.", required=False),
+                ToolParameter("stop_loss", "number", "Revised stop loss for the combined position", required=False),
+                ToolParameter("reason", "string", "Why you are scaling in (used for logging)", required=False),
+            ],
+            category="trading",
+            timeout=30,
+        )
+        super().__init__(definition)
+        self.exchange = exchange
+
+    async def execute(self, **kwargs) -> str:
+        symbol = kwargs.get("symbol")
+        side = kwargs.get("side")
+        amount = kwargs.get("amount")
+        price = kwargs.get("price")
+        stop_loss = kwargs.get("stop_loss")
+        reason = kwargs.get("reason", "scale in")
+
+        try:
+            order_side = OrderSide.BUY if side == "long" else OrderSide.SELL
+            order_type = OrderType.LIMIT if price else OrderType.MARKET
+            params = self.exchange.build_order_params(side=order_side, pos_side=side, reduce_only=False)
+
+            order = await self.exchange.create_order(
+                symbol=symbol, order_type=order_type, side=order_side,
+                amount=amount, price=price, params=params
+            )
+            if not order:
+                return '{"status": "error", "message": "Scale-in order failed"}'
+
+            result = {
+                "status": "success", "action": "scale_in",
+                "order_id": order.get("id"), "symbol": symbol,
+                "side": side, "amount": amount, "reason": reason,
+            }
+            if stop_loss:
+                await self._adjust_stop(symbol, side, amount, stop_loss)
+                result["revised_stop_loss"] = stop_loss
+
+            logger.info(f"Scale-in executed: {result}")
+            return str(result)
+        except Exception as e:
+            logger.error(f"Error scaling in: {e}", exc_info=True)
+            return f'{{"status": "error", "message": "{str(e)}"}}'
+
+    async def _adjust_stop(self, symbol, side, amount, stop_price):
+        try:
+            close_side = OrderSide.SELL if side == "long" else OrderSide.BUY
+            params = self.exchange.build_order_params(
+                side=close_side, pos_side=side, reduce_only=True,
+                extra_params={"stopPrice": stop_price}
+            )
+            await self.exchange.create_order(
+                symbol=symbol, order_type=OrderType.STOP_MARKET,
+                side=close_side, amount=amount, params=params
+            )
+        except Exception as e:
+            logger.warning(f"Failed to adjust stop on scale-in: {e}")
+
+
+class PartialCloseTool(BaseTool):
+    """
+    Partially close a position to lock in profits at target levels.
+    Institutional practice: close 1/3 at first target, 1/3 at second target,
+    let the runner go with a trailing stop.
+    """
+
+    def __init__(self, exchange: CommonExchange):
+        definition = ToolDefinition(
+            name="partial_close",
+            description=(
+                "Partially close a position to lock in profits. "
+                "Best practice: close 33% at R1, 33% at R2, trail the remaining 33%. "
+                "Provide a percentage (0–100) or absolute amount."
+            ),
+            parameters=[
+                ToolParameter("symbol", "string", "Trading pair, e.g. BTC/USDT", required=True),
+                ToolParameter("side", "string", "Position side: 'long' or 'short'", required=True, enum=["long", "short"]),
+                ToolParameter("close_percent", "number", "Percentage of position to close (0-100). Mutually exclusive with amount.", required=False),
+                ToolParameter("amount", "number", "Absolute number of contracts to close. Mutually exclusive with close_percent.", required=False),
+                ToolParameter("price", "number", "Limit price. Omit for market.", required=False),
+                ToolParameter("reason", "string", "Target level description, e.g. 'R1 pivot at 74500'", required=False),
+            ],
+            category="trading",
+            timeout=30,
+        )
+        super().__init__(definition)
+        self.exchange = exchange
+
+    async def execute(self, **kwargs) -> str:
+        symbol = kwargs.get("symbol")
+        side = kwargs.get("side")
+        close_percent = kwargs.get("close_percent")
+        amount = kwargs.get("amount")
+        price = kwargs.get("price")
+        reason = kwargs.get("reason", "take partial profit")
+
+        try:
+            positions = await self.exchange.fetch_positions([symbol])
+            pos = next((p for p in positions if p.get("side") == side and abs(p.get("contracts", 0)) > 0), None)
+            if not pos:
+                return f'{{"status": "error", "message": "No {side} position found for {symbol}"}}'
+
+            total = abs(pos.get("contracts", 0))
+            if close_percent:
+                close_amount = round(total * close_percent / 100, 8)
+            elif amount:
+                close_amount = min(amount, total)
+            else:
+                close_amount = total / 3  # default: close 1/3
+
+            close_side = OrderSide.SELL if side == "long" else OrderSide.BUY
+            order_type = OrderType.LIMIT if price else OrderType.MARKET
+            params = self.exchange.build_order_params(side=close_side, pos_side=side, reduce_only=True)
+
+            order = await self.exchange.create_order(
+                symbol=symbol, order_type=order_type, side=close_side,
+                amount=close_amount, price=price, params=params
+            )
+            if not order:
+                return '{"status": "error", "message": "Partial close order failed"}'
+
+            result = {
+                "status": "success", "action": "partial_close",
+                "order_id": order.get("id"), "symbol": symbol,
+                "side": side, "closed_amount": close_amount,
+                "remaining": round(total - close_amount, 8), "reason": reason,
+            }
+            logger.info(f"Partial close executed: {result}")
+            return str(result)
+        except Exception as e:
+            logger.error(f"Error partial closing: {e}", exc_info=True)
+            return f'{{"status": "error", "message": "{str(e)}"}}'
+
+
+class TrailingStopTool(BaseTool):
+    """
+    Set a trailing stop to protect profits while letting winners run.
+    Institutional use case: after 2R profit, move stop to break-even
+    then activate a % or ATR-based trailing stop.
+    """
+
+    def __init__(self, exchange: CommonExchange):
+        definition = ToolDefinition(
+            name="set_trailing_stop",
+            description=(
+                "Set a trailing stop loss that moves with price. "
+                "Use after the position moves 1.5–2R in profit to lock gains. "
+                "Specify either a fixed callback rate (%) or an ATR multiplier."
+            ),
+            parameters=[
+                ToolParameter("symbol", "string", "Trading pair, e.g. BTC/USDT", required=True),
+                ToolParameter("side", "string", "Position side: 'long' or 'short'", required=True, enum=["long", "short"]),
+                ToolParameter("callback_rate", "number", "Trailing distance as percentage of price (e.g. 1.5 = 1.5%)", required=False),
+                ToolParameter("activation_price", "number", "Price at which the trailing stop activates", required=False),
+                ToolParameter("amount", "number", "Contracts to protect. Omit for full position.", required=False),
+            ],
+            category="trading",
+            timeout=30,
+        )
+        super().__init__(definition)
+        self.exchange = exchange
+
+    async def execute(self, **kwargs) -> str:
+        symbol = kwargs.get("symbol")
+        side = kwargs.get("side")
+        callback_rate = kwargs.get("callback_rate", 1.5)
+        activation_price = kwargs.get("activation_price")
+        amount = kwargs.get("amount")
+
+        try:
+            if not amount:
+                positions = await self.exchange.fetch_positions([symbol])
+                pos = next((p for p in positions if p.get("side") == side and abs(p.get("contracts", 0)) > 0), None)
+                amount = abs(pos.get("contracts", 0)) if pos else 0
+
+            if not amount:
+                return f'{{"status": "error", "message": "No {side} position to protect"}}'
+
+            close_side = OrderSide.SELL if side == "long" else OrderSide.BUY
+            extra: dict = {"callbackRate": callback_rate}
+            if activation_price:
+                extra["activationPrice"] = activation_price
+
+            params = self.exchange.build_order_params(
+                side=close_side, pos_side=side, reduce_only=True,
+                extra_params=extra
+            )
+
+            order = await self.exchange.create_order(
+                symbol=symbol, order_type=OrderType.TRAILING_STOP_MARKET,
+                side=close_side, amount=amount, params=params
+            )
+
+            if not order:
+                return '{"status": "error", "message": "Trailing stop order failed"}'
+
+            result = {
+                "status": "success", "action": "set_trailing_stop",
+                "order_id": order.get("id"), "symbol": symbol,
+                "side": side, "callback_rate_pct": callback_rate,
+                "activation_price": activation_price,
+            }
+            logger.info(f"Trailing stop set: {result}")
+            return str(result)
+        except Exception as e:
+            logger.error(f"Error setting trailing stop: {e}", exc_info=True)
+            return f'{{"status": "error", "message": "{str(e)}"}}'
+
+
+class GetSwingLevelsTool(BaseTool):
+    """
+    Fetch key swing high/low levels from recent OHLCV data.
+    Used by the LLM to identify optimal entry zones, stop placements,
+    and profit targets based on market structure.
+    """
+
+    def __init__(self, exchange: CommonExchange):
+        definition = ToolDefinition(
+            name="get_swing_levels",
+            description=(
+                "Analyze recent price action to identify key swing highs and lows, "
+                "support/resistance zones, and suggest optimal stop and target levels. "
+                "Essential for swing trade entry planning."
+            ),
+            parameters=[
+                ToolParameter("symbol", "string", "Trading pair, e.g. BTC/USDT", required=True),
+                ToolParameter("timeframe", "string", "Candle timeframe, e.g. '4h', '1d'", required=False),
+                ToolParameter("lookback", "integer", "Number of candles to analyze (default 50)", required=False),
+            ],
+            category="analysis",
+            timeout=15,
+        )
+        super().__init__(definition)
+        self.exchange = exchange
+
+    async def execute(self, **kwargs) -> str:
+        symbol = kwargs.get("symbol")
+        timeframe = kwargs.get("timeframe", "4h")
+        lookback = kwargs.get("lookback", 50)
+
+        try:
+            klines = await self.exchange.fetch_ohlcv(symbol, timeframe, limit=lookback)
+            if not klines or len(klines) < 10:
+                return '{"status": "error", "message": "Insufficient kline data"}'
+
+            highs  = [k[2] for k in klines]
+            lows   = [k[3] for k in klines]
+            closes = [k[4] for k in klines]
+
+            # Identify swing highs/lows with a 5-bar pivot window
+            pivot_highs, pivot_lows = [], []
+            window = 5
+            for i in range(window, len(klines) - window):
+                if highs[i] == max(highs[i - window: i + window + 1]):
+                    pivot_highs.append(round(highs[i], 4))
+                if lows[i] == min(lows[i - window: i + window + 1]):
+                    pivot_lows.append(round(lows[i], 4))
+
+            current_price = closes[-1]
+            recent_high = max(highs[-20:])
+            recent_low  = min(lows[-20:])
+
+            # Key resistances above price
+            resistances = sorted([h for h in pivot_highs if h > current_price])[:3]
+            # Key supports below price
+            supports    = sorted([l for l in pivot_lows if l < current_price], reverse=True)[:3]
+
+            # ATR for stop sizing
+            from utils.indicator_calculator import IndicatorCalculator
+            atr_vals = IndicatorCalculator.atr(highs, lows, closes, 14)
+            atr = next((v for v in reversed(atr_vals) if v and not (v != v)), 0)
+
+            result = {
+                "status": "success",
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "current_price": round(current_price, 4),
+                "recent_range": {"high": round(recent_high, 4), "low": round(recent_low, 4)},
+                "resistances": resistances,
+                "supports": supports,
+                "atr_14": round(atr, 4),
+                "suggested_stop_long":   round(current_price - 1.5 * atr, 4),
+                "suggested_stop_short":  round(current_price + 1.5 * atr, 4),
+                "suggested_target_1x":   round(current_price + 2 * atr, 4),
+                "suggested_target_2x":   round(current_price + 4 * atr, 4),
+            }
+            return str(result)
+        except Exception as e:
+            logger.error(f"Error getting swing levels: {e}", exc_info=True)
+            return f'{{"status": "error", "message": "{str(e)}"}}'
+
+
 def create_trading_tools(exchange: CommonExchange) -> List[BaseTool]:
     """
-    创建交易工具集
-    
-    Args:
-        exchange: 交易所实例
-        symbol: 交易对
-    
-    Returns:
-        交易工具列表
+    Create the full institutional swing-trading tool set.
     """
     return [
         OpenLongTool(exchange),
@@ -716,6 +1021,9 @@ def create_trading_tools(exchange: CommonExchange) -> List[BaseTool]:
         ClosePositionTool(exchange),
         SetStopLossTool(exchange),
         SetTakeProfitTool(exchange),
-        # GetMarketInfoTool(exchange),
+        ScaleInTool(exchange),
+        PartialCloseTool(exchange),
+        TrailingStopTool(exchange),
+        GetSwingLevelsTool(exchange),
         CancelOrdersTool(exchange),
     ]
